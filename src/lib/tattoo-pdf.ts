@@ -1,4 +1,5 @@
 import jsPDF from "jspdf";
+import { resolveImageSrc } from "./image-src";
 
 // ── A4 + sheet-grid geometry ────────────────────────────────────────
 // A single A4 page in millimetres (portrait).
@@ -88,14 +89,7 @@ export function defaultStencilCenter(count: number): { x: number; y: number } {
   return { x: (cols * A4_MM.w) / 2, y: (rows * A4_MM.h) / 2 };
 }
 
-// ── Image loading (CORS-safe via proxy) ─────────────────────────────
-// Supabase Storage URLs must be proxied so the canvas isn't tainted when we
-// serialize it for jsPDF.
-function resolveImageSrc(src: string): string {
-  if (src.startsWith("blob:") || src.startsWith("data:")) return src;
-  return `/api/proxy-image?url=${encodeURIComponent(src)}`;
-}
-
+// ── Image loading (CORS-safe) ────────────────────────────────────────
 export function loadStencilImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();

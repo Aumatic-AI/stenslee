@@ -12,6 +12,7 @@ import DesignPatternSVG from "@/components/design/DesignPatternSVG";
 import StyleSelect from "@/components/ui/StyleSelect";
 import PinterestSearch from "@/components/pinterest/PinterestSearch";
 import { blobUrlToBase64 } from "@/lib/image-utils";
+import { resolveImageSrc } from "@/lib/image-src";
 import { TATTOO_COLORS } from "@/lib/tattoo-colors";
 import { TypographyGenerator } from "@/components/typography/TypographyGenerator";
 
@@ -1606,7 +1607,7 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
                             onClick={async (e) => {
                               e.stopPropagation();
                               try {
-                                const res = await fetch(`/api/proxy-image?url=${encodeURIComponent(design.imageUrl!)}`);
+                                const res = await fetch(resolveImageSrc(design.imageUrl!));
                                 const blob = await res.blob();
                                 const blobUrl = URL.createObjectURL(blob);
                                 const a = document.createElement("a");
