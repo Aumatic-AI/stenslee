@@ -24,7 +24,24 @@ export const TATTOO_COLORS: readonly TattooColor[] = [
   { name: "Skin / Flesh Tone",  hex: "#C68642", usage: "Realism blending and repair work" },
 ] as const;
 
-export function getColorsByHex(hexes: string[]): TattooColor[] {
-  const set = new Set(hexes.map((h) => h.toUpperCase()));
-  return TATTOO_COLORS.filter((c) => set.has(c.hex.toUpperCase()));
+/**
+ * Resolves any hex to a TattooColor — a curated match if it's in the master
+ * list, otherwise a synthesized entry so custom colors from the picker still
+ * carry a name/usage note into the AI prompt instead of being silently dropped.
+ */
+export function resolveColors(hexes: string[]): TattooColor[] {
+  return hexes.map((hex) => {
+    const HEX = hex.toUpperCase();
+    const match = TATTOO_COLORS.find((c) => c.hex.toUpperCase() === HEX);
+    return match ?? { name: `Custom ink (${HEX})`, hex: HEX, usage: "Custom color chosen by the customer" };
+  });
+}
+
+/** Black text reads better on light swatches, white on dark ones. */
+export function readableTextColor(hex: string): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.55 ? "#0A0A0A" : "#F5F5F5";
 }

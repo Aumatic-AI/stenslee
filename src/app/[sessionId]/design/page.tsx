@@ -15,21 +15,10 @@ import { blobUrlToBase64 } from "@/lib/image-utils";
 import { resolveImageSrc } from "@/lib/image-src";
 import { TATTOO_COLORS } from "@/lib/tattoo-colors";
 import { TypographyGenerator } from "@/components/typography/TypographyGenerator";
+import ColorPickerModal from "@/components/design/ColorPickerModal";
 
 const SERVICE_UNAVAILABLE_MSG =
   "AI generation credits are exhausted. Please contact the admin to top up the credits and restore the service.";
-
-// Pre-computed once at module load — avoids parseInt on every render cycle.
-// Maps hex (uppercase) → check icon colour so light swatches stay readable.
-const COLOUR_CHECK: Record<string, string> = Object.fromEntries(
-  TATTOO_COLORS.map((c) => {
-    const r = parseInt(c.hex.slice(1, 3), 16);
-    const g = parseInt(c.hex.slice(3, 5), 16);
-    const b = parseInt(c.hex.slice(5, 7), 16);
-    const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-    return [c.hex.toUpperCase(), lum > 0.55 ? "#0A0A0A" : "#F5F5F5"];
-  })
-);
 
 const STAGE_MESSAGES = [
   "Reading your brief…",
@@ -104,6 +93,7 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
   const [faithfulMode, setFaithfulMode] = useState(false);
   const [isTextTattoo, setIsTextTattoo] = useState(false);
   const [showTypographyModal, setShowTypographyModal] = useState(false);
+  const [showColorModal, setShowColorModal] = useState(false);
   const [textTattooRefUrl, setTextTattooRefUrl] = useState<string | null>(null);
   const [enhancing, setEnhancing] = useState(false);
   const [enhancedVariations, setEnhancedVariations] = useState<string[] | null>(null);
@@ -1160,52 +1150,45 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 -mx-0.5 px-0.5 scrollbar-thin">
-              {TATTOO_COLORS.map((c) => {
-                const isSelected = selectedColors.some(
-                  (h) => h.toUpperCase() === c.hex.toUpperCase()
-                );
-                const checkColor = COLOUR_CHECK[c.hex.toUpperCase()] ?? "#F5F5F5";
-
-                return (
-                  <button
-                    key={c.hex}
-                    type="button"
-                    onClick={() => toggleColor(c.hex)}
-                    title={`${c.name} — ${c.usage}`}
-                    aria-label={`${c.name} ${isSelected ? "(selected)" : ""}`}
-                    aria-pressed={isSelected}
-                    className={[
-                      "group relative flex-shrink-0 w-7 h-7 sm:w-8 sm:h-8 rounded-md cursor-pointer transition-all duration-150",
-                      "ring-1 ring-inset",
-                      isSelected
-                        ? "ring-gold shadow-[0_0_0_2px_rgba(201,168,76,0.35)] -translate-y-0.5"
-                        : "ring-white/10 hover:ring-gold/50 hover:-translate-y-0.5",
-                    ].join(" ")}
-                    style={{ backgroundColor: c.hex }}
-                  >
-                    {isSelected && (
-                      <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke={checkColor}
-                        strokeWidth={3.5}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="absolute inset-1 pointer-events-none drop-shadow-[0_1px_1px_rgba(0,0,0,0.4)]"
-                      >
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                    )}
-                    {/* Hover tooltip — anchored ABOVE the swatch so it never collides with the next row */}
-                    <span className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-full mb-2 whitespace-nowrap text-[10px] font-mono text-ink bg-bg border border-cleo-border px-2 py-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity z-20 shadow-lg">
-                      {c.name}
-                    </span>
-                  </button>
-                );
-              })}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {selectedColors.map((hex) => (
+                <button
+                  key={hex}
+                  type="button"
+                  onClick={() => toggleColor(hex)}
+                  title={`${hex.toUpperCase()} — tap to remove`}
+                  aria-label={`Remove ${hex.toUpperCase()}`}
+                  className="relative flex-shrink-0 w-7 h-7 sm:w-8 sm:h-8 rounded-md cursor-pointer ring-1 ring-inset ring-gold shadow-[0_0_0_2px_rgba(201,168,76,0.35)] transition-transform hover:-translate-y-0.5"
+                  style={{ backgroundColor: hex }}
+                >
+                  <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-error text-white text-[10px] flex items-center justify-center leading-none shadow-sm">
+                    ×
+                  </span>
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setShowColorModal(true)}
+                title="Add a color"
+                aria-label="Add a color"
+                className="flex-shrink-0 w-7 h-7 sm:w-8 sm:h-8 rounded-md border border-dashed border-cleo-border hover:border-gold/50 text-muted hover:text-gold transition-colors cursor-pointer flex items-center justify-center text-base leading-none"
+              >
+                +
+              </button>
             </div>
           </div>
+
+          {showColorModal && (
+            <ColorPickerModal
+              presets={TATTOO_COLORS}
+              onPick={(hex) => {
+                if (!selectedColors.some((c) => c.toUpperCase() === hex.toUpperCase())) {
+                  toggleColor(hex);
+                }
+              }}
+              onClose={() => setShowColorModal(false)}
+            />
+          )}
 
           {/* Reference images */}
           <div className="flex flex-col gap-3">
@@ -1937,6 +1920,11 @@ const BODY_AREA_CHIPS = [
   "Calf",
   "Ankle",
   "Neck",
+  "Half Sleeve",
+  "Outer Full Sleeve",
+  "Half Leg",
+  "Outer Full Leg",
+  "Full Back",
 ] as const;
 
 function BodyAreaPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
