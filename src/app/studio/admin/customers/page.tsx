@@ -82,7 +82,7 @@ export default function CustomersPage() {
   }, [search, customers]);
 
   return (
-    <main className="min-h-[100dvh] bg-bg flex flex-col">
+    <div className="min-h-[100dvh] bg-bg flex flex-col">
       {/* Header */}
       <header className="px-4 sm:px-6 pt-5 pb-4 border-b border-cleo-border flex items-center gap-3">
         <Link href="/studio/admin" className="text-muted hover:text-gold transition-colors text-xs font-mono tracking-wider flex items-center gap-1.5 flex-shrink-0">
@@ -213,6 +213,6 @@ export default function CustomersPage() {
           </div>
         )}
       </div>
-    </main>
+    </div>
   );
 }

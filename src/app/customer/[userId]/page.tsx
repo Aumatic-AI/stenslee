@@ -202,28 +202,28 @@ function CustomerDashboardInner() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-bg flex items-center justify-center">
+      <div className="min-h-screen bg-bg flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
           <div className="w-8 h-8 border-2 border-gold border-t-transparent rounded-full animate-spin" />
           <p className="text-muted font-mono text-sm tracking-widest">LOADING…</p>
         </div>
-      </main>
+      </div>
     );
   }
 
   if (notFound) {
     return (
-      <main className="min-h-screen bg-bg flex flex-col items-center justify-center gap-6 px-4">
+      <div className="min-h-screen bg-bg flex flex-col items-center justify-center gap-6 px-4">
         <p className="font-cinzel text-xl text-ink">Customer not found.</p>
         <Link href={backUrl} className="text-gold underline font-mono text-sm">← {backLabel}</Link>
-      </main>
+      </div>
     );
   }
 
   const memberYear = profile ? new Date(profile.created_at).getFullYear() : "";
 
   return (
-    <main className="min-h-[100dvh] bg-bg flex flex-col">
+    <div className="min-h-[100dvh] bg-bg flex flex-col">
       {/* Header */}
       <header className="px-4 sm:px-6 pt-6 sm:pt-8 pb-4 sm:pb-6 border-b border-cleo-border flex items-center justify-between gap-3">
         <button
@@ -496,16 +496,16 @@ function CustomerDashboardInner() {
           </button>
         </div>
       )}
-    </main>
+    </div>
   );
 }
 
 export default function CustomerDashboard() {
   return (
     <Suspense fallback={
-      <main className="min-h-screen bg-bg flex items-center justify-center">
+      <div className="min-h-screen bg-bg flex items-center justify-center">
         <div className="w-8 h-8 border-2 border-gold border-t-transparent rounded-full animate-spin" />
-      </main>
+      </div>
     }>
       <CustomerDashboardInner />
     </Suspense>

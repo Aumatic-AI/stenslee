@@ -140,17 +140,17 @@ export default function AdminDashboard() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-bg flex items-center justify-center">
+      <div className="min-h-screen bg-bg flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
           <div className="w-8 h-8 border-2 border-gold border-t-transparent rounded-full animate-spin" />
           <p className="text-muted font-mono text-sm tracking-widest">LOADING…</p>
         </div>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="min-h-[100dvh] bg-bg flex flex-col">
+    <div className="min-h-[100dvh] bg-bg flex flex-col">
       {/* Header */}
       <header className="px-4 sm:px-6 pt-5 pb-4 border-b border-cleo-border flex items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
@@ -317,6 +317,6 @@ export default function AdminDashboard() {
         </motion.div>
 
       </div>
-    </main>
+    </div>
   );
 }

@@ -147,18 +147,18 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
   // ── Loading ──────────────────────────────────────────────────
   if (loading) {
     return (
-      <main className="min-h-screen bg-bg flex items-center justify-center">
+      <div className="min-h-screen bg-bg flex items-center justify-center">
         <div className="w-8 h-8 border-2 border-gold border-t-transparent rounded-full animate-spin" />
-      </main>
+      </div>
     );
   }
 
   if (notFound || !session) {
     return (
-      <main className="min-h-screen bg-bg flex flex-col items-center justify-center gap-4">
+      <div className="min-h-screen bg-bg flex flex-col items-center justify-center gap-4">
         <p className="font-cinzel text-xl text-ink">Session not found.</p>
         <Link href={backUrl} className="text-gold underline font-mono text-sm">← {backLabel}</Link>
-      </main>
+      </div>
     );
   }
 
@@ -183,7 +183,7 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
     "text-gold bg-gold/10 border-gold/30";
 
   return (
-    <main className="min-h-[100dvh] bg-bg flex flex-col">
+    <div className="min-h-[100dvh] bg-bg flex flex-col">
       {/* Header */}
       <header className="px-4 sm:px-6 pt-5 pb-4 border-b border-cleo-border flex items-center gap-3">
         <Link href={backUrl} className="text-muted hover:text-gold transition-colors text-xs font-mono tracking-wider flex items-center gap-1.5 flex-shrink-0">
@@ -434,6 +434,6 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
           </motion.div>
         )}
       </AnimatePresence>
-    </main>
+    </div>
   );
 }

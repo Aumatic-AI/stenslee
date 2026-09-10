@@ -53,7 +53,7 @@ export default function AdminSettingsPage() {
   }
 
   return (
-    <main className="min-h-[100dvh] bg-bg flex flex-col">
+    <div className="min-h-[100dvh] bg-bg flex flex-col">
       <header className="px-4 sm:px-6 pt-5 pb-4 border-b border-cleo-border flex items-center gap-3">
         <Link href="/studio/admin" className="text-muted hover:text-gold transition-colors text-xs font-mono tracking-wider flex items-center gap-1.5">
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -120,6 +120,6 @@ export default function AdminSettingsPage() {
           )}
         </motion.div>
       </div>
-    </main>
+    </div>
   );
 }

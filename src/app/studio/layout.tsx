@@ -1,5 +1,8 @@
-// Middleware already enforces auth for /studio/* — this layout is a pass-through.
-// The per-page components fetch their own staff session client-side for UI data.
+import AdminSidebarShell from "@/components/layout/AdminSidebarShell";
+
+// Middleware already enforces auth for /studio/* — this just adds the
+// persistent admin sidebar (shown only when the viewer is actually an
+// admin; a no-op wrapper otherwise).
 export default function StudioLayout({ children }: { children: React.ReactNode }) {
-  return <>{children}</>;
+  return <AdminSidebarShell>{children}</AdminSidebarShell>;
 }
