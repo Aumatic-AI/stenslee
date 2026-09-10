@@ -38,8 +38,16 @@ export default function AdminDashboard() {
       .from("staff").select("role").eq("id", user.id).maybeSingle();
     if (staffCheck?.role !== "admin") { router.push("/studio/designer"); return; }
 
-    const [staffRes, sessionsRes, totalRes, finalDesignsRes] = await Promise.all([
-      fetch("/api/studio/designers"),
+    // Reads staff directly (RLS already grants admins full access to this
+    // table) instead of going through a Next.js API route — one less
+    // server-side hop that could fail independently of the browser session.
+    const [staffRes, countsRes, sessionsRes, totalRes, finalDesignsRes] = await Promise.all([
+      supabase
+        .from("staff")
+        .select("id, email, name, role, is_active, created_at")
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false }),
+      supabase.from("sessions").select("designer_id"),
       supabase
         .from("sessions")
         .select("id, tattoo_style, status, created_at, users(first_name), designer:designer_id(name)", { count: "exact" })
@@ -49,16 +57,11 @@ export default function AdminDashboard() {
       supabase.from("tattoo_designs").select("id", { count: "exact", head: true }).eq("is_finalized", true),
     ]);
 
-    if (staffRes.ok) {
-      const { staff: allStaff } = await staffRes.json() as { staff: StaffMember[] };
-
-      // Count sessions per designer
-      const { data: counts } = await supabase
-        .from("sessions")
-        .select("designer_id");
+    if (staffRes.data) {
+      const allStaff = staffRes.data as StaffMember[];
 
       const countMap: Record<string, number> = {};
-      (counts ?? []).forEach((s: { designer_id: string | null }) => {
+      (countsRes.data ?? []).forEach((s: { designer_id: string | null }) => {
         if (s.designer_id) countMap[s.designer_id] = (countMap[s.designer_id] ?? 0) + 1;
       });
 
