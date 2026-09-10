@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
+import { resolveBackUrl } from "@/lib/auth-utils";
 import TattooPrintStudio from "@/components/print/TattooPrintStudio";
 
 // ── Types ─────────────────────────────────────────────────────
@@ -72,15 +73,17 @@ function SectionHeader({ title, count }: { title: string; count?: number }) {
 
 interface SessionOverviewProps {
   sessionId: string;
-  /** Where the back button navigates */
-  backUrl: string;
-  /** Label shown next to the back arrow */
-  backLabel: string;
+  /** Raw ?from= query param — validated against the viewer's actual role */
+  from?: string;
+  /** Fallback back-button destination when `from` isn't usable */
+  defaultBackUrl: string;
+  /** Fallback back-button label when `from` isn't usable */
+  defaultBackLabel: string;
 }
 
 // ── Main component ────────────────────────────────────────────
 
-export default function SessionOverview({ sessionId, backUrl, backLabel }: SessionOverviewProps) {
+export default function SessionOverview({ sessionId, from, defaultBackUrl, defaultBackLabel }: SessionOverviewProps) {
   const router = useRouter();
   const supabase = createSupabaseBrowserClient();
 
@@ -90,11 +93,23 @@ export default function SessionOverview({ sessionId, backUrl, backLabel }: Sessi
   const [notFound, setNotFound] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [printOpen, setPrintOpen] = useState(false);
+  const [backUrl, setBackUrl] = useState(defaultBackUrl);
+  const [backLabel, setBackLabel] = useState(defaultBackLabel);
 
   useEffect(() => {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { router.push("/studio/login"); return; }
+
+      const { data: staffRow } = await supabase
+        .from("staff")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
+      const role = (staffRow?.role as "admin" | "designer" | undefined) ?? null;
+      const resolved = resolveBackUrl(from, role, defaultBackUrl, defaultBackLabel);
+      setBackUrl(resolved.backUrl);
+      setBackLabel(resolved.backLabel);
 
       const { data } = await supabase
         .from("sessions")
