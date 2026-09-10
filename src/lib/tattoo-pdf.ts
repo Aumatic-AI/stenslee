@@ -238,18 +238,43 @@ export interface StencilExportOptions {
   /** Safe-area margin in mm. Defaults to STENCIL_MARGIN_MM (2mm). */
   marginMm?: number;
   /**
-   * CSS brightness() percent applied to the ink — 100 = normal, below 100
-   * darker, above 100 lighter. Defaults to DEFAULT_BRIGHTNESS (100).
+   * Ink tone adjustment: 0 = normal, negative = darker/bolder ink, positive =
+   * lighter/faded ink. Range [MIN_INK_TONE, MAX_INK_TONE]. Defaults to
+   * DEFAULT_INK_TONE (0). See `inkToneFilter()` for how this maps to a CSS
+   * filter.
    */
-  brightness?: number;
+  inkTone?: number;
 }
 
-// Ink darkness/lightness adjustment — a plain brightness filter on the
-// stencil image, applied identically to the on-screen preview and every
-// export format so what you see is what prints.
-export const DEFAULT_BRIGHTNESS = 100;
-export const MIN_BRIGHTNESS = 50; // darkest
-export const MAX_BRIGHTNESS = 150; // lightest
+// Ink darkness/lightness adjustment, applied identically to the on-screen
+// preview and every export format so what you see is what prints.
+export const DEFAULT_INK_TONE = 0;
+export const MIN_INK_TONE = -100; // darkest / boldest
+export const MAX_INK_TONE = 100; // lightest / most faded
+
+/**
+ * A plain brightness() filter looked wrong at both ends: darkening also
+ * greyed out the white background (multiplying 255 by <100% isn't white
+ * anymore), and lightening barely affected near-black ink (multiplying ~0 by
+ * >100% is still ~0). Contrast fixes both — it pushes dark pixels toward
+ * black and light pixels toward white (or the reverse) while leaving true
+ * white/black anchored — so darkening deepens the ink without greying the
+ * page, and a touch of extra brightness on the lightening side gives a real
+ * faded-ink look instead of a no-op.
+ */
+export function inkToneFilter(tone: number): string {
+  if (tone === 0) return "none";
+  if (tone < 0) {
+    // Darker/bolder: raise contrast only — blacks deepen, white stays white.
+    const contrast = 100 - tone; // tone -100 → 200%
+    return `contrast(${contrast}%)`;
+  }
+  // Lighter/faded: drop contrast (ink fades toward grey) and lift brightness
+  // (pushes it further toward white) together for a visible fade.
+  const contrast = 100 - tone * 0.6; // tone 100 → 40%
+  const brightness = 100 + tone * 0.5; // tone 100 → 150%
+  return `contrast(${contrast}%) brightness(${brightness}%)`;
+}
 
 const EXPORT_DPI = 150; // plenty for a ~1K source design; higher adds file size, not detail
 
@@ -259,13 +284,13 @@ function drawInstance(
   img: HTMLImageElement,
   inst: StencilInstance,
   dx: number, dy: number, dw: number, dh: number,
-  brightness: number = DEFAULT_BRIGHTNESS
+  inkTone: number = DEFAULT_INK_TONE
 ) {
   ctx.save();
   ctx.translate(dx + dw / 2, dy + dh / 2);
   if (inst.mirrored) ctx.scale(-1, 1);
   if (inst.rotation) ctx.rotate((inst.rotation * Math.PI) / 180);
-  ctx.filter = brightness !== DEFAULT_BRIGHTNESS ? `brightness(${brightness}%)` : "none";
+  ctx.filter = inkToneFilter(inkTone);
   ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
   ctx.restore();
 }
@@ -286,7 +311,7 @@ export async function downloadTattooStencilPdf({
   subtitle,
   filename = "tattoo-stencil.pdf",
   marginMm = STENCIL_MARGIN_MM,
-  brightness = DEFAULT_BRIGHTNESS,
+  inkTone = DEFAULT_INK_TONE,
 }: StencilExportOptions): Promise<void> {
   const img = image ?? (await loadStencilImage(imageUrl));
   const aspect = img.naturalWidth > 0 && img.naturalHeight > 0 ? img.naturalWidth / img.naturalHeight : 1;
@@ -324,7 +349,7 @@ export async function downloadTattooStencilPdf({
           (tattooTop - row * pageSize.h) * pxPerMm,
           tattooW * pxPerMm,
           tattooH * pxPerMm,
-          brightness
+          inkTone
         );
       }
 
@@ -395,7 +420,7 @@ export async function downloadTattooStencilImage({
   image,
   filename = "tattoo-stencil.png",
   format = "png",
-  brightness = DEFAULT_BRIGHTNESS,
+  inkTone = DEFAULT_INK_TONE,
 }: StencilExportOptions & { format?: "png" | "jpeg" }): Promise<void> {
   const img = image ?? (await loadStencilImage(imageUrl));
   const aspect = img.naturalWidth > 0 && img.naturalHeight > 0 ? img.naturalWidth / img.naturalHeight : 1;
@@ -416,7 +441,7 @@ export async function downloadTattooStencilImage({
 
   for (let ii = 0; ii < instances.length; ii++) {
     const { tattooLeft, tattooTop, tattooW, tattooH } = layouts[ii];
-    drawInstance(ctx, img, instances[ii], tattooLeft * pxPerMm, tattooTop * pxPerMm, tattooW * pxPerMm, tattooH * pxPerMm, brightness);
+    drawInstance(ctx, img, instances[ii], tattooLeft * pxPerMm, tattooTop * pxPerMm, tattooW * pxPerMm, tattooH * pxPerMm, inkTone);
   }
 
   const mime = format === "jpeg" ? "image/jpeg" : "image/png";

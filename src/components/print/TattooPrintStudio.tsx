@@ -10,9 +10,10 @@ import {
   DEFAULT_SIZE_MM,
   MIN_SIZE_MM,
   MAX_SIZE_MM,
-  DEFAULT_BRIGHTNESS,
-  MIN_BRIGHTNESS,
-  MAX_BRIGHTNESS,
+  DEFAULT_INK_TONE,
+  MIN_INK_TONE,
+  MAX_INK_TONE,
+  inkToneFilter,
   mmToUnit,
   unitToMm,
   computeStencilLayout,
@@ -49,7 +50,7 @@ export default function TattooPrintStudio({ imageUrl, subtitle, filenameBase = "
   const [pageFormat, setPageFormat] = useState<PageFormat>(DEFAULT_PAGE_FORMAT);
   const [exportFormat, setExportFormat] = useState<ExportFormat>("pdf");
   const [sizeUnit, setSizeUnit] = useState<SizeUnit>("in");
-  const [brightness, setBrightness] = useState(DEFAULT_BRIGHTNESS);
+  const [inkTone, setInkTone] = useState(DEFAULT_INK_TONE);
   const [isPageSizeOpen, setIsPageSizeOpen] = useState(false);
   const pageSizeRef = useRef<HTMLDivElement>(null);
 
@@ -219,7 +220,7 @@ export default function TattooPrintStudio({ imageUrl, subtitle, filenameBase = "
         instances: instances.map(({ center, sizeMm, rotation, mirrored }) => ({ center, sizeMm, rotation, mirrored })),
         subtitle,
         marginMm,
-        brightness,
+        inkTone,
       };
       if (exportFormat === "pdf") {
         await downloadTattooStencilPdf({
@@ -348,7 +349,7 @@ export default function TattooPrintStudio({ imageUrl, subtitle, filenameBase = "
                       transform: `${inst.mirrored ? "scaleX(-1) " : ""}rotate(${inst.rotation}deg)`,
                       touchAction: "none",
                       objectFit: "contain",
-                      filter: brightness !== DEFAULT_BRIGHTNESS ? `brightness(${brightness}%)` : undefined,
+                      filter: inkTone !== DEFAULT_INK_TONE ? inkToneFilter(inkTone) : undefined,
                       outline: isSelected ? "2px solid rgba(201,168,76,0.85)" : "none",
                       outlineOffset: "3px",
                     }}
@@ -618,16 +619,16 @@ export default function TattooPrintStudio({ imageUrl, subtitle, filenameBase = "
             <div className="flex items-center justify-between">
               <label className="text-[10px] font-mono tracking-[0.15em] uppercase text-muted">Ink darkness</label>
               <span className="text-gold text-xs font-mono font-bold">
-                {brightness === DEFAULT_BRIGHTNESS ? "Normal" : `${brightness}%`}
+                {inkTone === DEFAULT_INK_TONE ? "Normal" : inkTone < 0 ? `${-inkTone}% Bolder` : `${inkTone}% Faded`}
               </span>
             </div>
             <input
               type="range"
-              min={MIN_BRIGHTNESS}
-              max={MAX_BRIGHTNESS}
-              step={5}
-              value={brightness}
-              onChange={(e) => setBrightness(Number(e.target.value))}
+              min={MIN_INK_TONE}
+              max={MAX_INK_TONE}
+              step={2}
+              value={inkTone}
+              onChange={(e) => setInkTone(Number(e.target.value))}
               className="w-full accent-gold cursor-pointer"
             />
             <div className="flex justify-between text-[9px] font-mono text-muted/40">
