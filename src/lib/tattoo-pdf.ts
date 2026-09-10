@@ -12,8 +12,12 @@ export interface PageFormat {
 export const PAGE_FORMATS: PageFormat[] = [
   { key: "a4", label: "A4", w: 210, h: 297 },
   { key: "a3", label: "A3", w: 297, h: 420 },
+  { key: "a2", label: "A2", w: 420, h: 594 },
+  { key: "a5", label: "A5", w: 148, h: 210 },
   { key: "letter", label: "Letter", w: 215.9, h: 279.4 },
   { key: "legal", label: "Legal", w: 215.9, h: 355.6 },
+  { key: "tabloid", label: "Tabloid", w: 279.4, h: 431.8 },
+  { key: "executive", label: "Executive", w: 184.15, h: 266.7 },
 ];
 
 export const DEFAULT_PAGE_FORMAT = PAGE_FORMATS[0];
