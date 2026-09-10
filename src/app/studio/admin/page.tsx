@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import Image from "next/image";
 import { motion } from "framer-motion";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 import Link from "next/link";
@@ -22,7 +21,6 @@ export default function AdminDashboard() {
   const router = useRouter();
   const supabase = createSupabaseBrowserClient();
 
-  const [admin, setAdmin] = useState<{ name: string } | null>(null);
   const [recentSessions, setRecentSessions] = useState<SessionRow[]>([]);
   const [totalSessionCount, setTotalSessionCount] = useState(0);
   const [stats, setStats] = useState({ totalDesigners: 0, activeDesigners: 0, totalCustomers: 0, finalDesigns: 0 });
@@ -34,9 +32,8 @@ export default function AdminDashboard() {
     if (!user) { router.push("/studio/login"); return; }
 
     const { data: staffCheck } = await supabase
-      .from("staff").select("role, name").eq("id", user.id).maybeSingle();
+      .from("staff").select("role").eq("id", user.id).maybeSingle();
     if (staffCheck?.role !== "admin") { router.push("/studio/designer"); return; }
-    setAdmin({ name: staffCheck.name });
 
     // Counts only ({count: "exact", head: true} — no rows transferred) since
     // that's all the dashboard needs, instead of fetching every staff row.
@@ -86,14 +83,6 @@ export default function AdminDashboard() {
 
   const hasMoreSessions = recentSessions.length < totalSessionCount;
 
-  async function handleLogout() {
-    // scope: "local" clears this device's session without a server round
-    // trip — a dropped connection there must never leave the cookie intact.
-    await supabase.auth.signOut({ scope: "local" });
-    router.push("/studio/login");
-    router.refresh();
-  }
-
   const statusColor = (s: string) =>
     s === "completed" ? "text-success" : s === "abandoned" ? "text-error" : "text-gold";
 
@@ -110,31 +99,12 @@ export default function AdminDashboard() {
 
   return (
     <div className="min-h-[100dvh] bg-bg flex flex-col">
-      {/* Header */}
-      <header className="px-4 sm:px-6 pt-5 pb-4 border-b border-cleo-border flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 relative flex-shrink-0">
-            <Image src="/cleopatra-logo.svg" alt="Cleopatra" fill className="object-contain" />
-          </div>
-          <div>
-            <p className="font-cinzel text-[11px] font-bold tracking-[0.15em] text-gold uppercase leading-none">Cleopatra Ink</p>
-            <p className="text-[10px] font-mono text-muted tracking-wider leading-none mt-0.5">Admin Portal</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="hidden sm:block text-ink text-sm font-semibold">{admin?.name}</span>
-          <span className="text-[9px] font-mono tracking-widest uppercase px-2 py-1 rounded-md bg-gold/10 border border-gold/30 text-gold">Admin</span>
-          <button onClick={handleLogout} className="text-muted hover:text-error transition-colors text-xs font-mono tracking-wider px-3 py-2 rounded-lg border border-cleo-border hover:border-error/40 cursor-pointer">
-            Logout
-          </button>
-        </div>
-      </header>
-
       <div className="flex-1 px-4 sm:px-6 py-6 sm:py-8 max-w-4xl mx-auto w-full flex flex-col gap-8">
 
         {/* Stats */}
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
-          <p className="text-gold text-[11px] font-mono tracking-[0.2em] uppercase mb-3">Studio Overview</p>
+          <p className="text-gold text-[11px] font-mono tracking-[0.2em] uppercase mb-1">Studio Overview</p>
+          <h1 className="font-cinzel text-2xl font-black text-ink mb-4">Dashboard</h1>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
               { label: "Designers", value: stats.totalDesigners, href: "/studio/admin/designers" },
