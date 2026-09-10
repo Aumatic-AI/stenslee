@@ -38,7 +38,7 @@ export async function getStaffSession(): Promise<StaffMember | null> {
 
   const { data: staff } = await supabase
     .from("staff")
-    .select("id, email, name, role, is_active, created_at, deleted_at")
+    .select("id, email, name, role, is_active, created_at, deleted_at, avatar_url")
     .eq("id", user.id)
     .maybeSingle();
 

@@ -152,6 +152,10 @@ export default function SessionOverview({ sessionId, backUrl, backLabel }: Sessi
   const designs = Array.isArray(session.tattoo_designs) ? session.tattoo_designs : [];
   const placements = Array.isArray(session.placements) ? session.placements : [];
 
+  // If any design was already generated, resume at Placement (the design
+  // page auto-selects one of them on hydration); otherwise resume at Design.
+  const continueUrl = designs.length > 0 ? `/${session.id}/placement` : `/${session.id}/design`;
+
   const finalDesign = designs.find((d) => d.is_finalized);
   const finalPlacement =
     placements.find((p) => p.is_finalized) ??
@@ -176,6 +180,15 @@ export default function SessionOverview({ sessionId, backUrl, backLabel }: Sessi
         <span className="text-cleo-border">/</span>
         <span className="text-muted text-xs font-mono truncate">Session #{sessionId}</span>
         <div className="ml-auto flex items-center gap-3">
+          {/* Continue — active sessions left mid-flow have no other way back in */}
+          {session.status === "active" && (
+            <button
+              onClick={() => router.push(continueUrl)}
+              className="h-8 px-3 rounded-lg bg-gold/95 border border-gold text-bg font-cinzel font-bold text-[10px] tracking-[0.1em] uppercase hover:bg-gold-light transition-colors flex items-center gap-1.5 cursor-pointer shadow-[0_0_16px_rgba(201,168,76,0.25)]"
+            >
+              <span>✦ Continue Design</span>
+            </button>
+          )}
           {/* Download — opens the print studio (A4 stencil layout) */}
           {finalDesign && (
             <button

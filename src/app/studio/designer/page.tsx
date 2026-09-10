@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
+import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 import { useAppStore } from "@/store/app-store";
@@ -23,6 +24,9 @@ interface RecentSession {
   users: { first_name: string; phone: string } | null;
 }
 
+const SESSIONS_PAGE_SIZE = 10;
+const MIN_QUERY_LENGTH = 1;
+
 function formatPhone(value: string) {
   const d = value.replace(/\D/g, "").slice(0, 10);
   if (d.length <= 3) return d;
@@ -35,13 +39,18 @@ export default function DesignerDashboard() {
   const { setDesignerId, startSession, startSessionForUser } = useAppStore();
 
   const [staff, setStaff] = useState<StaffMember | null>(null);
-  const [phone, setPhone] = useState("");
+  const [query, setQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<{ id: string; first_name: string; phone: string }[] | null>(null);
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerResult | null>(null);
   const [name, setName] = useState("");
-  const [searchResult, setSearchResult] = useState<CustomerResult | null | "not_found">(null);
+  const [newPhone, setNewPhone] = useState("");
   const [searching, setSearching] = useState(false);
+  const [selecting, setSelecting] = useState(false);
   const [starting, setStarting] = useState(false);
   const [recentSessions, setRecentSessions] = useState<RecentSession[]>([]);
+  const [totalSessionCount, setTotalSessionCount] = useState(0);
   const [loadingRecent, setLoadingRecent] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const supabase = createSupabaseBrowserClient();
 
@@ -52,7 +61,7 @@ export default function DesignerDashboard() {
 
       const { data: staffRow } = await supabase
         .from("staff")
-        .select("id, email, name, role, is_active, created_at")
+        .select("id, email, name, role, is_active, created_at, avatar_url")
         .eq("id", user.id)
         .maybeSingle();
 
@@ -60,65 +69,108 @@ export default function DesignerDashboard() {
       setStaff(staffRow as StaffMember);
       setDesignerId(staffRow.id);
 
-      // Load recent sessions for this designer
-      const { data: sessions } = await supabase
+      const { data: sessions, count } = await supabase
         .from("sessions")
-        .select("id, tattoo_style, status, created_at, users(first_name, phone)")
+        .select("id, tattoo_style, status, created_at, users(first_name, phone)", { count: "exact" })
         .eq("designer_id", staffRow.id)
         .order("created_at", { ascending: false })
-        .limit(5);
+        .range(0, SESSIONS_PAGE_SIZE - 1);
 
-      setRecentSessions((sessions ?? []) as unknown as RecentSession[]);
+      const rows = (sessions ?? []) as unknown as RecentSession[];
+      setRecentSessions(rows);
+      setTotalSessionCount(count ?? rows.length);
       setLoadingRecent(false);
     }
     init();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function handlePhoneSearch(e: React.FormEvent) {
-    e.preventDefault();
-    const digits = phone.replace(/\D/g, "");
-    if (digits.length < 10) return;
+  async function handleLoadMoreSessions() {
+    if (!staff || loadingMore) return;
+    setLoadingMore(true);
+    const { data } = await supabase
+      .from("sessions")
+      .select("id, tattoo_style, status, created_at, users(first_name, phone)")
+      .eq("designer_id", staff.id)
+      .order("created_at", { ascending: false })
+      .range(recentSessions.length, recentSessions.length + SESSIONS_PAGE_SIZE - 1);
 
-    setSearching(true);
-    setSearchResult(null);
-    setName("");
+    const rows = (data ?? []) as unknown as RecentSession[];
+    setRecentSessions((prev) => [...prev, ...rows]);
+    setLoadingMore(false);
+  }
 
-    const { data: customer } = await supabase
-      .from("users")
-      .select("id, first_name, phone")
-      .eq("phone", phone)
-      .maybeSingle();
+  // Whether more sessions exist beyond what's currently loaded — compared
+  // against the real total count, not "did the last page come back full"
+  // (that heuristic breaks when the total is an exact multiple of the page
+  // size, e.g. exactly 5 sessions: a full first page looks like "more" when
+  // there's actually none left).
+  const hasMoreSessions = recentSessions.length < totalSessionCount;
 
-    if (!customer) {
-      setSearchResult("not_found");
-      setSearching(false);
+  // Live search as the designer types — searches both name and phone,
+  // debounced so it doesn't fire on every keystroke, and only once there's
+  // enough typed to make a search worthwhile.
+  useEffect(() => {
+    setSelectedCustomer(null);
+    const q = query.trim();
+    if (q.length < MIN_QUERY_LENGTH) {
+      setSearchResults(null);
       return;
     }
+    setSearching(true);
+    const timer = setTimeout(async () => {
+      const { data } = await supabase.rpc("search_customers", { q });
+      setSearchResults(data ?? []);
+      if (!data || data.length === 0) {
+        // No match — prefill the create-new form from whatever they typed.
+        const digitsOnly = q.replace(/\D/g, "");
+        const isPhoneShaped = /^[\d\s()+-]+$/.test(q);
+        if (isPhoneShaped && digitsOnly.length > 0 && digitsOnly.length <= 10) {
+          // A real (possibly partial) phone number — safe to prefill.
+          setName("");
+          setNewPhone(formatPhone(q));
+        } else if (!isPhoneShaped) {
+          // Contains letters — treat it as an attempted name.
+          setName(q);
+          setNewPhone("");
+        } else {
+          // All digits but more than 10 — not a valid phone number (likely
+          // a typo). Truncating it would silently produce a DIFFERENT,
+          // real customer's number, so leave both fields blank instead of
+          // guessing.
+          setName("");
+          setNewPhone("");
+        }
+      }
+      setSearching(false);
+    }, 500);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
 
-    // Count their sessions
+  async function handleSelectCustomer(customer: { id: string; first_name: string; phone: string }) {
+    setSelecting(true);
     const { count } = await supabase
       .from("sessions")
       .select("id", { count: "exact", head: true })
       .eq("user_id", customer.id)
       .eq("status", "completed");
-
-    setSearchResult({ ...customer, session_count: count ?? 0 });
-    setSearching(false);
+    setSelectedCustomer({ ...customer, session_count: count ?? 0 });
+    setSelecting(false);
   }
 
   async function handleStartExisting() {
-    if (!searchResult || searchResult === "not_found") return;
+    if (!selectedCustomer) return;
     setStarting(true);
-    const sessionId = await startSessionForUser(searchResult.id, searchResult.first_name, searchResult.phone);
+    const sessionId = await startSessionForUser(selectedCustomer.id, selectedCustomer.first_name, selectedCustomer.phone);
     router.push(`/${sessionId}/design`);
   }
 
   async function handleCreateNew(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim() || newPhone.replace(/\D/g, "").length < 10) return;
     setStarting(true);
-    const { sessionId, userId } = await startSession(name.trim(), phone);
+    const { sessionId, userId } = await startSession(name.trim(), newPhone);
 
     if (userId && !sessionId) {
       // Existing user detected mid-flow — go to their dashboard
@@ -129,15 +181,17 @@ export default function DesignerDashboard() {
   }
 
   async function handleLogout() {
-    await supabase.auth.signOut();
+    // scope: "local" clears this device's session without a server round
+    // trip — a dropped connection there must never leave the cookie intact.
+    await supabase.auth.signOut({ scope: "local" });
     setDesignerId(null);
     router.push("/studio/login");
     router.refresh();
   }
 
   function handleGoToCustomer() {
-    if (searchResult && searchResult !== "not_found") {
-      router.push(`/customer/${searchResult.id}?from=/studio/designer`);
+    if (selectedCustomer) {
+      router.push(`/customer/${selectedCustomer.id}?from=/studio/designer`);
     }
   }
 
@@ -162,10 +216,19 @@ export default function DesignerDashboard() {
 
         <div className="flex items-center gap-3">
           {staff && (
-            <div className="hidden sm:flex flex-col items-end">
-              <p className="text-ink text-sm font-semibold leading-none">{staff.name}</p>
-              <p className="text-muted text-[10px] font-mono tracking-wider uppercase mt-0.5">Designer</p>
-            </div>
+            <Link href="/studio/designer/settings" className="hidden sm:flex items-center gap-2.5 group">
+              <div className="w-8 h-8 rounded-full bg-gold/10 border border-gold/30 group-hover:border-gold transition-colors flex items-center justify-center overflow-hidden flex-shrink-0 relative">
+                {staff.avatar_url ? (
+                  <Image src={staff.avatar_url} alt={staff.name} fill unoptimized className="object-cover" />
+                ) : (
+                  <span className="font-cinzel text-xs font-black text-gold">{staff.name.charAt(0).toUpperCase()}</span>
+                )}
+              </div>
+              <div className="flex flex-col items-end">
+                <p className="text-ink text-sm font-semibold leading-none group-hover:text-gold transition-colors">{staff.name}</p>
+                <p className="text-muted text-[10px] font-mono tracking-wider uppercase mt-0.5">Designer</p>
+              </div>
+            </Link>
           )}
           <button
             onClick={handleLogout}
@@ -194,34 +257,58 @@ export default function DesignerDashboard() {
         >
           <div>
             <h2 className="font-cinzel text-sm font-bold tracking-[0.15em] text-gold uppercase">Customer Lookup</h2>
-            <p className="text-muted text-xs mt-1">Enter the customer&apos;s phone to find their account or create a new one.</p>
+            <p className="text-muted text-xs mt-1">Search by name or phone number to find their account, or create a new one.</p>
           </div>
 
-          <form onSubmit={handlePhoneSearch} className="flex gap-2">
+          <div className="flex flex-col gap-2">
             <input
-              type="tel"
-              inputMode="numeric"
-              value={phone}
-              onChange={(e) => {
-                setPhone(formatPhone(e.target.value));
-                setSearchResult(null);
-                setName("");
-              }}
-              placeholder="(555) 000-0000"
-              className="flex-1 bg-bg border border-cleo-border rounded-xl px-4 py-3 text-ink font-mono text-base placeholder:text-muted/40 focus:outline-none focus:border-gold transition-colors"
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Name or phone number…"
+              className="w-full bg-bg border border-cleo-border rounded-xl px-4 py-3 text-ink font-mono text-base placeholder:text-muted/40 focus:outline-none focus:border-gold transition-colors"
             />
-            <button
-              type="submit"
-              disabled={searching || phone.replace(/\D/g, "").length < 10}
-              className="px-5 py-3 bg-gold text-bg font-cinzel font-bold text-sm tracking-[0.08em] uppercase rounded-xl border border-gold hover:bg-gold-light transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-            >
-              {searching ? "…" : "Find"}
-            </button>
-          </form>
+            {searching && (
+              <p className="text-muted text-xs font-mono flex items-center gap-1.5">
+                <span className="w-3 h-3 border-2 border-gold border-t-transparent rounded-full animate-spin inline-block" />
+                Searching…
+              </p>
+            )}
+          </div>
 
           <AnimatePresence mode="wait">
-            {/* Existing customer found */}
-            {searchResult && searchResult !== "not_found" && (
+            {/* Multiple/partial matches — pick one */}
+            {!selectedCustomer && searchResults && searchResults.length > 0 && (
+              <motion.div
+                key="results"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="flex flex-col gap-2 pt-1 border-t border-cleo-border"
+              >
+                {searchResults.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => handleSelectCustomer(c)}
+                    disabled={selecting}
+                    className="flex items-center gap-3 text-left px-3 py-2.5 rounded-xl border border-cleo-border hover:border-gold/40 transition-colors cursor-pointer disabled:opacity-60"
+                  >
+                    <div className="w-8 h-8 rounded-full bg-gold/10 border border-gold/20 flex items-center justify-center flex-shrink-0">
+                      <span className="font-cinzel text-xs font-black text-gold">
+                        {c.first_name.charAt(0).toUpperCase()}
+                      </span>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-ink text-sm font-semibold truncate">{c.first_name}</p>
+                      <p className="text-muted text-xs font-mono truncate">{c.phone}</p>
+                    </div>
+                  </button>
+                ))}
+              </motion.div>
+            )}
+
+            {/* Existing customer selected */}
+            {selectedCustomer && (
               <motion.div
                 key="found"
                 initial={{ opacity: 0, y: 8 }}
@@ -232,13 +319,13 @@ export default function DesignerDashboard() {
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full bg-gold/10 border border-gold/30 flex items-center justify-center flex-shrink-0">
                     <span className="font-cinzel text-base font-black text-gold">
-                      {searchResult.first_name.charAt(0).toUpperCase()}
+                      {selectedCustomer.first_name.charAt(0).toUpperCase()}
                     </span>
                   </div>
                   <div className="flex-1">
-                    <p className="text-ink font-semibold">{searchResult.first_name}</p>
+                    <p className="text-ink font-semibold">{selectedCustomer.first_name}</p>
                     <p className="text-muted text-xs font-mono">
-                      {searchResult.phone} · {searchResult.session_count} completed {searchResult.session_count === 1 ? "session" : "sessions"}
+                      {selectedCustomer.phone} · {selectedCustomer.session_count} completed {selectedCustomer.session_count === 1 ? "session" : "sessions"}
                     </p>
                   </div>
                 </div>
@@ -260,8 +347,8 @@ export default function DesignerDashboard() {
               </motion.div>
             )}
 
-            {/* Not found — show create form */}
-            {searchResult === "not_found" && (
+            {/* No matches — show create form */}
+            {searchResults && searchResults.length === 0 && (
               <motion.form
                 key="not_found"
                 initial={{ opacity: 0, y: 8 }}
@@ -271,20 +358,27 @@ export default function DesignerDashboard() {
                 className="flex flex-col gap-3 pt-1 border-t border-cleo-border"
               >
                 <p className="text-muted text-xs">
-                  No account found for this number. Enter the customer&apos;s name to create one.
+                  No account found. Enter the customer&apos;s name and phone to create one.
                 </p>
                 <input
                   type="text"
                   placeholder="Customer full name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  autoFocus
                   className="bg-bg border border-cleo-border rounded-xl px-4 py-3 text-ink text-base placeholder:text-muted/40 focus:outline-none focus:border-gold transition-colors"
+                />
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  placeholder="(555) 000-0000"
+                  value={newPhone}
+                  onChange={(e) => setNewPhone(formatPhone(e.target.value))}
+                  className="bg-bg border border-cleo-border rounded-xl px-4 py-3 text-ink font-mono text-base placeholder:text-muted/40 focus:outline-none focus:border-gold transition-colors"
                 />
                 <button
                   type="submit"
-                  disabled={starting || !name.trim()}
-                  className="py-3 bg-gold text-bg font-cinzel font-bold text-sm tracking-[0.08em] uppercase rounded-xl border border-gold hover:bg-gold-light transition-colors disabled:opacity-60 cursor-pointer"
+                  disabled={starting || !name.trim() || newPhone.replace(/\D/g, "").length < 10}
+                  className="py-3 bg-gold text-bg font-cinzel font-bold text-sm tracking-[0.08em] uppercase rounded-xl border border-gold hover:bg-gold-light transition-colors disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
                 >
                   {starting ? "Creating…" : "✦ Create Account & Start Design"}
                 </button>
@@ -301,9 +395,13 @@ export default function DesignerDashboard() {
           className="flex flex-col gap-4"
         >
           <div className="flex items-center gap-3">
-            <h2 className="font-cinzel text-sm font-bold tracking-[0.18em] text-muted uppercase">Recent Sessions</h2>
+            <h2 className="font-cinzel text-sm font-bold tracking-[0.18em] text-muted uppercase">Total Sessions</h2>
             <div className="flex-1 h-px bg-cleo-border" />
-            <span className="text-[10px] font-mono text-muted">Last 5</span>
+            {!loadingRecent && (
+              <span className="text-[10px] font-mono text-muted">
+                {recentSessions.length} of {totalSessionCount}
+              </span>
+            )}
           </div>
 
           {loadingRecent ? (
@@ -349,6 +447,15 @@ export default function DesignerDashboard() {
                   </motion.button>
                 );
               })}
+              {hasMoreSessions && (
+                <button
+                  onClick={handleLoadMoreSessions}
+                  disabled={loadingMore}
+                  className="mt-1 py-2.5 text-center text-xs font-mono uppercase tracking-widest text-gold hover:text-gold-light border border-cleo-border hover:border-gold/40 rounded-xl transition-colors cursor-pointer disabled:opacity-60"
+                >
+                  {loadingMore ? "Loading…" : "Load More"}
+                </button>
+              )}
             </div>
           )}
         </motion.div>

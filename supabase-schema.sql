@@ -312,6 +312,38 @@ on conflict (id) do nothing;
 -- Monitor: select * from cron.job_run_details order by start_time desc limit 20;
 -- Remove:  select cron.unschedule('cleanup-expired-sessions');
 
+-- ── CUSTOMER SEARCH (name + phone, partial match) ────────────
+-- Used by the designer dashboard's live customer lookup. Matches on
+-- first_name OR phone as a substring; the phone side compares digits only
+-- so formatting ((555) 123-4567 vs 5551234567) never breaks a match.
+-- The phone branch only runs when the WHOLE query looks like a phone
+-- number (digits/spaces/()+- only) — otherwise a mixed query like
+-- "s2s2s2s2" would get its letters stripped down to "2222" and wrongly
+-- match any phone number containing four 2's in a row.
+-- security_invoker = true so it still honors RLS on `users` (staff-only read).
+create or replace function public.search_customers(q text)
+returns table (id uuid, first_name text, phone text)
+language sql
+stable
+security invoker
+as $$
+  select id, first_name, phone
+  from public.users
+  where first_name ilike '%' || q || '%'
+     or (
+       btrim(q) ~ '^[0-9 ()+-]+$'
+       and regexp_replace(phone, '\D', '', 'g') ilike '%' || regexp_replace(q, '\D', '', 'g') || '%'
+     )
+  order by first_name
+  limit 10;
+$$;
+
+-- ── STAFF AVATAR ──────────────────────────────────────────────
+-- Profile photo for a staff member (designer or admin), shown on their
+-- own dashboard/settings and on the admin designer-detail page. Nullable —
+-- falls back to the existing initial-letter badge when unset.
+alter table public.staff add column if not exists avatar_url text;
+
 -- ── VERIFY ───────────────────────────────────────────────────
 -- Run after setup to confirm everything is in place:
 -- select table_name from information_schema.tables where table_schema = 'public' order by table_name;
