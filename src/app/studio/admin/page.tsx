@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { motion } from "framer-motion";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
-import type { StaffMember } from "@/lib/staff-types";
 import Link from "next/link";
 
 const SESSIONS_PAGE_SIZE = 10;
@@ -23,7 +22,7 @@ export default function AdminDashboard() {
   const router = useRouter();
   const supabase = createSupabaseBrowserClient();
 
-  const [admin, setAdmin] = useState<StaffMember | null>(null);
+  const [admin, setAdmin] = useState<{ name: string } | null>(null);
   const [recentSessions, setRecentSessions] = useState<SessionRow[]>([]);
   const [totalSessionCount, setTotalSessionCount] = useState(0);
   const [stats, setStats] = useState({ totalDesigners: 0, activeDesigners: 0, totalCustomers: 0, finalDesigns: 0 });
@@ -35,19 +34,17 @@ export default function AdminDashboard() {
     if (!user) { router.push("/studio/login"); return; }
 
     const { data: staffCheck } = await supabase
-      .from("staff").select("role").eq("id", user.id).maybeSingle();
+      .from("staff").select("role, name").eq("id", user.id).maybeSingle();
     if (staffCheck?.role !== "admin") { router.push("/studio/designer"); return; }
+    setAdmin({ name: staffCheck.name });
 
-    // Reads staff directly (RLS already grants admins full access to this
-    // table) instead of going through a Next.js API route — one less
-    // server-side hop that could fail independently of the browser session.
-    const [staffRes, countsRes, sessionsRes, totalRes, finalDesignsRes] = await Promise.all([
-      supabase
-        .from("staff")
-        .select("id, email, name, role, is_active, created_at")
-        .is("deleted_at", null)
-        .order("created_at", { ascending: false }),
-      supabase.from("sessions").select("designer_id"),
+    // Counts only ({count: "exact", head: true} — no rows transferred) since
+    // that's all the dashboard needs, instead of fetching every staff row.
+    const [totalDesignersRes, activeDesignersRes, sessionsRes, totalCustomersRes, finalDesignsRes] = await Promise.all([
+      supabase.from("staff").select("id", { count: "exact", head: true })
+        .eq("role", "designer").is("deleted_at", null),
+      supabase.from("staff").select("id", { count: "exact", head: true })
+        .eq("role", "designer").eq("is_active", true).is("deleted_at", null),
       supabase
         .from("sessions")
         .select("id, tattoo_style, status, created_at, users(first_name), designer:designer_id(name)", { count: "exact" })
@@ -57,35 +54,16 @@ export default function AdminDashboard() {
       supabase.from("tattoo_designs").select("id", { count: "exact", head: true }).eq("is_finalized", true),
     ]);
 
-    if (staffRes.data) {
-      const allStaff = staffRes.data as StaffMember[];
-
-      const countMap: Record<string, number> = {};
-      (countsRes.data ?? []).forEach((s: { designer_id: string | null }) => {
-        if (s.designer_id) countMap[s.designer_id] = (countMap[s.designer_id] ?? 0) + 1;
-      });
-
-      const des = allStaff
-        .filter((s) => s.role === "designer")
-        .map((s) => ({ ...s, session_count: countMap[s.id] ?? 0 }));
-
-      setAdmin(allStaff.find((s) => s.id === user.id && s.role === "admin") ?? null);
-      setStats((prev) => ({
-        ...prev,
-        totalDesigners: des.length,
-        activeDesigners: des.filter((d) => d.is_active).length,
-      }));
-    }
-
     const rows = (sessionsRes.data ?? []) as unknown as SessionRow[];
     setRecentSessions(rows);
     setTotalSessionCount(sessionsRes.count ?? rows.length);
 
-    setStats((prev) => ({
-      ...prev,
-      totalCustomers: totalRes.count ?? 0,
+    setStats({
+      totalDesigners: totalDesignersRes.count ?? 0,
+      activeDesigners: activeDesignersRes.count ?? 0,
+      totalCustomers: totalCustomersRes.count ?? 0,
       finalDesigns: finalDesignsRes.count ?? 0,
-    }));
+    });
 
     setLoading(false);
   }, [router, supabase]);
