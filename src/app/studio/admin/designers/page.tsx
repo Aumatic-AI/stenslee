@@ -118,11 +118,10 @@ function DesignersPageInner() {
 
   async function toggleDesigner(id: string, current: boolean) {
     setTogglingId(id);
-    await fetch("/api/studio/designers", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, is_active: !current }),
-    });
+    // Plain is_active flip — RLS already grants admins direct write access
+    // to `staff`, no need for the API route's server-side hop.
+    const { error } = await supabase.from("staff").update({ is_active: !current }).eq("id", id);
+    if (error) { setTogglingId(null); return; }
     const patch = (arr: DesignerRow[]) =>
       arr.map((d) => d.id === id ? { ...d, is_active: !current } : d);
     setDesigners(patch);
@@ -197,31 +196,65 @@ function DesignersPageInner() {
     setEditSaving(true);
     setEditError("");
 
+    const nameChanged = name !== editingDesigner.name;
+    const emailChanged = email !== editingDesigner.email;
     const activeChanged = editActive !== editingDesigner.is_active;
-    const res = await fetch("/api/studio/designers", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id: editingDesigner.id,
-        name,
-        email,
-        ...(activeChanged ? { is_active: editActive } : {}),
-        ...(editAvatarBase64 ? { avatarBase64: editAvatarBase64 } : {}),
-      }),
-    });
+    const avatarChanged = !!editAvatarBase64;
 
-    if (!res.ok) {
-      const { error } = await res.json().catch(() => ({ error: "Failed to save changes" }));
-      setEditError(error ?? "Failed to save changes");
-      setEditSaving(false);
-      return;
+    let updated: StaffMember | null = null;
+
+    if (emailChanged || avatarChanged) {
+      // Changing the login email needs the Supabase Admin API, and the
+      // photo upload needs the storage service role — both only available
+      // server-side. Only take this path when one of them actually changed.
+      const res = await fetch("/api/studio/designers", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: editingDesigner.id,
+          ...(nameChanged ? { name } : {}),
+          ...(emailChanged ? { email } : {}),
+          ...(activeChanged ? { is_active: editActive } : {}),
+          ...(avatarChanged ? { avatarBase64: editAvatarBase64 } : {}),
+        }),
+      });
+
+      if (!res.ok) {
+        const { error } = await res.json().catch(() => ({ error: "Failed to save changes" }));
+        setEditError(error ?? "Failed to save changes");
+        setEditSaving(false);
+        return;
+      }
+      ({ staff: updated } = await res.json() as { staff: StaffMember });
+    } else if (nameChanged || activeChanged) {
+      // A plain name/active-status change — RLS already grants admins
+      // direct write access to `staff`, so this skips the API route (and
+      // its own server-side Supabase dependency) entirely.
+      const updates: { name?: string; is_active?: boolean } = {};
+      if (nameChanged) updates.name = name;
+      if (activeChanged) updates.is_active = editActive;
+
+      const { data, error } = await supabase
+        .from("staff")
+        .update(updates)
+        .eq("id", editingDesigner.id)
+        .select("id, email, name, role, is_active, created_at, avatar_url")
+        .single();
+
+      if (error) {
+        setEditError("Failed to save changes");
+        setEditSaving(false);
+        return;
+      }
+      updated = data as StaffMember;
     }
 
-    const { staff: updated } = await res.json() as { staff: StaffMember };
-    const patch = (arr: DesignerRow[]) =>
-      arr.map((d) => d.id === updated.id ? { ...d, ...updated } : d);
-    setDesigners(patch);
-    setSearchResults((prev) => prev ? patch(prev) : prev);
+    if (updated) {
+      const patch = (arr: DesignerRow[]) =>
+        arr.map((d) => d.id === updated!.id ? { ...d, ...updated } : d);
+      setDesigners(patch);
+      setSearchResults((prev) => prev ? patch(prev) : prev);
+    }
 
     setEditSaving(false);
     setEditingDesigner(null);
