@@ -1085,9 +1085,9 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
             </AnimatePresence>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-stretch">
           {/* Text tattoo toggle */}
-          <div className="flex items-center gap-3 p-3 bg-bg rounded-xl border border-cleo-border">
+          <div className="flex items-center gap-3 p-3 bg-bg rounded-xl border border-cleo-border h-full">
             <div className="flex-1 min-w-0">
               <p className="text-xs font-cinzel font-bold text-ink leading-tight">
                 Text Tattoo Mode
@@ -1129,7 +1129,7 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
           </div>
 
           {/* Colour palette */}
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2 p-3 bg-bg rounded-xl border border-cleo-border h-full">
             <div className="flex items-center justify-between gap-3">
               <label className="text-xs font-mono tracking-[0.15em] uppercase text-muted">
                 Palette <span className="text-muted/40 normal-case">(optional)</span>
