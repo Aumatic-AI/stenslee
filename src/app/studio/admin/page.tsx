@@ -22,12 +22,9 @@ export default function AdminDashboard() {
   const supabase = createSupabaseBrowserClient();
 
   const [admin, setAdmin] = useState<StaffMember | null>(null);
-  const [designers, setDesigners] = useState<(StaffMember & { session_count: number })[]>([]);
   const [recentSessions, setRecentSessions] = useState<SessionRow[]>([]);
   const [stats, setStats] = useState({ totalDesigners: 0, activeDesigners: 0, totalCustomers: 0, finalDesigns: 0 });
   const [loading, setLoading] = useState(true);
-  const [togglingId, setTogglingId] = useState<string | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -65,7 +62,6 @@ export default function AdminDashboard() {
         .filter((s) => s.role === "designer")
         .map((s) => ({ ...s, session_count: countMap[s.id] ?? 0 }));
 
-      setDesigners(des);
       setAdmin(allStaff.find((s) => s.id === user.id && s.role === "admin") ?? null);
       setStats((prev) => ({
         ...prev,
@@ -88,46 +84,6 @@ export default function AdminDashboard() {
   }, [router, supabase]);
 
   useEffect(() => { load(); }, [load]);
-
-  async function toggleDesigner(id: string, current: boolean) {
-    setTogglingId(id);
-    await fetch("/api/studio/designers", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, is_active: !current }),
-    });
-    setDesigners((prev) => prev.map((d) => d.id === id ? { ...d, is_active: !current } : d));
-    setTogglingId(null);
-  }
-
-  async function deleteDesigner(id: string, name: string) {
-    const ok = window.confirm(
-      `Remove ${name}? They will no longer appear in the designers list and cannot log in. All past sessions and customer history they worked on will remain intact.`
-    );
-    if (!ok) return;
-
-    setDeletingId(id);
-    const res = await fetch("/api/studio/designers", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id }),
-    });
-
-    if (!res.ok) {
-      const { error } = await res.json().catch(() => ({ error: "Failed to remove designer" }));
-      window.alert(error ?? "Failed to remove designer");
-      setDeletingId(null);
-      return;
-    }
-
-    setDesigners((prev) => prev.filter((d) => d.id !== id));
-    setStats((prev) => ({
-      ...prev,
-      totalDesigners: Math.max(0, prev.totalDesigners - 1),
-      activeDesigners: Math.max(0, prev.activeDesigners - (designers.find((d) => d.id === id)?.is_active ? 1 : 0)),
-    }));
-    setDeletingId(null);
-  }
 
   async function handleLogout() {
     await supabase.auth.signOut();
@@ -178,8 +134,8 @@ export default function AdminDashboard() {
           <p className="text-gold text-[11px] font-mono tracking-[0.2em] uppercase mb-3">Studio Overview</p>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
-              { label: "Designers", value: stats.totalDesigners },
-              { label: "Active", value: stats.activeDesigners },
+              { label: "Designers", value: stats.totalDesigners, href: "/studio/admin/designers" },
+              { label: "Active", value: stats.activeDesigners, href: "/studio/admin/designers?status=active" },
               { label: "Customers", value: stats.totalCustomers, href: "/studio/admin/customers" },
               { label: "Final Designs", value: stats.finalDesigns },
             ].map((stat) =>
@@ -199,78 +155,6 @@ export default function AdminDashboard() {
               )
             )}
           </div>
-        </motion.div>
-
-        {/* Designers */}
-        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.1 }} className="flex flex-col gap-4">
-          <div className="flex items-center gap-3">
-            <h2 className="font-cinzel text-sm font-bold tracking-[0.18em] text-muted uppercase">Designers</h2>
-            <div className="flex-1 h-px bg-cleo-border" />
-            <Link href="/studio/admin/designers/new" className="px-4 py-2 bg-gold text-bg font-cinzel font-bold text-xs tracking-[0.08em] uppercase rounded-lg border border-gold hover:bg-gold-light transition-colors">
-              + Add Designer
-            </Link>
-          </div>
-
-          {designers.length === 0 ? (
-            <div className="bg-surface border border-cleo-border rounded-xl p-6 text-center">
-              <p className="text-muted text-sm">No designers yet. Add one above.</p>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2">
-              {designers.map((d) => (
-                <div key={d.id} className="bg-surface border border-cleo-border rounded-xl px-4 py-3 flex items-center gap-4">
-                  {/* Clickable designer info */}
-                  <Link href={`/studio/admin/designers/${d.id}`} className="flex items-center gap-3 flex-1 min-w-0 group">
-                    <div className="w-9 h-9 rounded-full bg-gold/10 border border-gold/20 flex items-center justify-center flex-shrink-0 group-hover:border-gold/50 transition-colors">
-                      <span className="font-cinzel text-sm font-black text-gold">{d.name.charAt(0).toUpperCase()}</span>
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-ink text-sm font-semibold truncate group-hover:text-gold transition-colors">{d.name}</p>
-                      <p className="text-muted text-xs font-mono truncate">{d.email} · {d.session_count} sessions</p>
-                    </div>
-                  </Link>
-
-                  {/* Active toggle */}
-                  <button
-                    onClick={() => toggleDesigner(d.id, d.is_active)}
-                    disabled={togglingId === d.id}
-                    title={d.is_active ? "Deactivate" : "Activate"}
-                    className={`flex-shrink-0 relative w-11 h-6 rounded-full border transition-colors cursor-pointer disabled:opacity-50 ${
-                      d.is_active ? "bg-success/20 border-success/40" : "bg-cleo-border border-cleo-border"
-                    }`}
-                  >
-                    <span className={`absolute top-0.5 w-5 h-5 rounded-full transition-all ${
-                      d.is_active ? "left-5 bg-success" : "left-0.5 bg-muted"
-                    }`} />
-                  </button>
-                  <span className={`text-[10px] font-mono uppercase w-10 flex-shrink-0 ${d.is_active ? "text-success" : "text-muted/50"}`}>
-                    {d.is_active ? "Active" : "Off"}
-                  </span>
-
-                  {/* Delete (soft) */}
-                  <button
-                    onClick={() => deleteDesigner(d.id, d.name)}
-                    disabled={deletingId === d.id}
-                    title="Remove designer"
-                    aria-label={`Remove ${d.name}`}
-                    className="flex-shrink-0 w-8 h-8 rounded-lg border border-cleo-border text-muted hover:text-error hover:border-error/40 transition-colors flex items-center justify-center cursor-pointer disabled:opacity-50"
-                  >
-                    {deletingId === d.id ? (
-                      <div className="w-3.5 h-3.5 border-2 border-error border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
-                      </svg>
-                    )}
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <Link href="/studio/admin/settings" className="text-muted hover:text-gold transition-colors text-xs font-mono tracking-wider w-fit">
-            Change Admin Password →
-          </Link>
         </motion.div>
 
         {/* Recent Sessions */}
