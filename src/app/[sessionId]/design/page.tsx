@@ -1132,7 +1132,7 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
           <div className="flex flex-col gap-2 p-3 bg-bg rounded-xl border border-cleo-border h-full">
             <div className="flex items-center justify-between gap-3">
               <label className="text-xs font-mono tracking-[0.15em] uppercase text-muted">
-                Palette <span className="text-muted/40 normal-case">(optional)</span>
+                Color Palette <span className="text-muted/40 normal-case">(optional)</span>
               </label>
               <div className="flex items-center gap-2 text-[10px] font-mono">
                 <span className={selectedColors.length > 0 ? "text-gold" : "text-muted/60"}>
