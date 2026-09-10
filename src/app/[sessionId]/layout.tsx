@@ -1,7 +1,7 @@
 "use client";
 
 import { use } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { useAppStore } from "@/store/app-store";
@@ -20,13 +20,37 @@ export default function SessionLayout({
 }) {
   const { sessionId } = use(params);
   const pathname = usePathname();
+  const router = useRouter();
   const customerName = useAppStore((s) => s.customerName);
 
   const currentStep = STEPS.findIndex((s) => pathname.includes(s.path));
+  const isPlacement = pathname.includes("placement");
+
+  function handleBack() {
+    // Placement always came from Design in this flow — go there directly.
+    // Design is step 1, so "back" means leaving the flow the way we arrived.
+    if (isPlacement) router.push(`/${sessionId}/design`);
+    else router.back();
+  }
 
   return (
     <div className="min-h-screen bg-bg flex flex-col">
       <header className="sticky top-0 z-30 bg-surface border-b border-cleo-border px-4 sm:px-6 py-3 flex items-center gap-4">
+        {/* Back */}
+        <button
+          type="button"
+          onClick={handleBack}
+          className="text-muted hover:text-gold transition-colors flex items-center gap-1 flex-shrink-0 cursor-pointer"
+          aria-label="Go back"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+          <span className="hidden sm:block text-xs font-mono tracking-wider">Back</span>
+        </button>
+
+        <div className="w-px h-5 bg-cleo-border flex-shrink-0" />
+
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2.5 flex-shrink-0">
           <div className="w-6 h-6 relative">
