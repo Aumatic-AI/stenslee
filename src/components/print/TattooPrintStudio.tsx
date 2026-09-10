@@ -619,7 +619,7 @@ export default function TattooPrintStudio({ imageUrl, subtitle, filenameBase = "
             <div className="flex items-center justify-between">
               <label className="text-[10px] font-mono tracking-[0.15em] uppercase text-muted">Ink darkness</label>
               <span className="text-gold text-xs font-mono font-bold">
-                {inkTone === DEFAULT_INK_TONE ? "Normal" : inkTone < 0 ? `${-inkTone}% Bolder` : `${inkTone}% Faded`}
+                {inkTone === DEFAULT_INK_TONE ? "Normal" : inkTone < 0 ? `${-inkTone}% Darker` : `${inkTone}% Lighter`}
               </span>
             </div>
             <input

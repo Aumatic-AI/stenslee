@@ -256,20 +256,25 @@ export const MAX_INK_TONE = 100; // lightest / most faded
  * A plain brightness() filter looked wrong at both ends: darkening also
  * greyed out the white background (multiplying 255 by <100% isn't white
  * anymore), and lightening barely affected near-black ink (multiplying ~0 by
- * >100% is still ~0). Contrast fixes both — it pushes dark pixels toward
- * black and light pixels toward white (or the reverse) while leaving true
- * white/black anchored — so darkening deepens the ink without greying the
- * page, and a touch of extra brightness on the lightening side gives a real
- * faded-ink look instead of a no-op.
+ * >100% is still ~0). A contrast-only darken fixed the grey-background
+ * problem but overcorrected — it left the background pinned to pure white
+ * instead of darkening along with the ink. Both ends now combine contrast
+ * (keeps ink legible against the background as everything shifts) with
+ * brightness (moves the whole image, background included, toward black or
+ * white) so darker/lighter genuinely affects the whole page, not just the ink.
  */
 export function inkToneFilter(tone: number): string {
   if (tone === 0) return "none";
   if (tone < 0) {
-    // Darker/bolder: raise contrast only — blacks deepen, white stays white.
-    const contrast = 100 - tone; // tone -100 → 200%
-    return `contrast(${contrast}%)`;
+    // Darker: dim everything (brightness) while boosting contrast so the ink
+    // stays legible against the now-darker background instead of flattening
+    // into one grey mass.
+    const t = -tone;
+    const contrast = 100 + t * 0.8; // tone -100 → 180%
+    const brightness = 100 - t * 0.35; // tone -100 → 65%
+    return `contrast(${contrast}%) brightness(${brightness}%)`;
   }
-  // Lighter/faded: drop contrast (ink fades toward grey) and lift brightness
+  // Lighter: drop contrast (ink fades toward grey) and lift brightness
   // (pushes it further toward white) together for a visible fade.
   const contrast = 100 - tone * 0.6; // tone 100 → 40%
   const brightness = 100 + tone * 0.5; // tone 100 → 150%
