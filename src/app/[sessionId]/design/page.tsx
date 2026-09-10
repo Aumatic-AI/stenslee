@@ -27,6 +27,17 @@ const STAGE_MESSAGES = [
   "Polishing final details…",
 ];
 
+// Small numbered header used to visually separate the form into steps.
+function SectionHeading({ n, title }: { n: number; title: string }) {
+  return (
+    <div className="flex items-center gap-2 -mb-1">
+      <span className="w-5 h-5 rounded-full bg-gold/10 border border-gold/30 text-gold text-[10px] font-mono font-bold flex items-center justify-center flex-shrink-0">
+        {n}
+      </span>
+      <h2 className="font-cinzel text-xs font-bold tracking-[0.15em] text-ink uppercase">{title}</h2>
+    </div>
+  );
+}
 
 export default function DesignPage({ params }: { params: Promise<{ sessionId: string }> }) {
   const { sessionId } = use(params);
@@ -972,6 +983,8 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
           transition={{ duration: 0.4, delay: 0.08 }}
           className="bg-surface rounded-2xl border border-cleo-border p-4 sm:p-6 flex flex-col gap-5"
         >
+          <SectionHeading n={1} title="Style & Placement" />
+
           {/* Style picker */}
           <div className="flex flex-col gap-2">
             <label className="text-xs font-mono tracking-[0.15em] uppercase text-muted">
@@ -982,6 +995,15 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
 
           {/* Body placement hint */}
           <BodyAreaPicker value={targetBodyArea} onChange={setTargetBodyArea} />
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.1 }}
+          className="bg-surface rounded-2xl border border-cleo-border p-4 sm:p-6 flex flex-col gap-5"
+        >
+          <SectionHeading n={2} title="Describe Your Tattoo" />
 
           {/* Description */}
           <div className="flex flex-col gap-2">
@@ -1084,7 +1106,17 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
               )}
             </AnimatePresence>
           </div>
+        </motion.div>
 
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.12 }}
+          className="bg-surface rounded-2xl border border-cleo-border p-4 sm:p-6 flex flex-col gap-5"
+        >
+          <SectionHeading n={3} title="Options" />
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
           {/* Text tattoo toggle */}
           <div className="flex items-center gap-3 p-3 bg-bg rounded-xl border border-cleo-border">
             <div className="flex-1 min-w-0">
@@ -1177,18 +1209,28 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
               </button>
             </div>
           </div>
+          </div>
+        </motion.div>
 
-          {showColorModal && (
-            <ColorPickerModal
-              presets={TATTOO_COLORS}
-              onPick={(hex) => {
-                if (!selectedColors.some((c) => c.toUpperCase() === hex.toUpperCase())) {
-                  toggleColor(hex);
-                }
-              }}
-              onClose={() => setShowColorModal(false)}
-            />
-          )}
+        {showColorModal && (
+          <ColorPickerModal
+            presets={TATTOO_COLORS}
+            onPick={(hex) => {
+              if (!selectedColors.some((c) => c.toUpperCase() === hex.toUpperCase())) {
+                toggleColor(hex);
+              }
+            }}
+            onClose={() => setShowColorModal(false)}
+          />
+        )}
+
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.14 }}
+          className="bg-surface rounded-2xl border border-cleo-border p-4 sm:p-6 flex flex-col gap-5"
+        >
+          <SectionHeading n={4} title="Reference Images" />
 
           {/* Reference images */}
           <div className="flex flex-col gap-3">
@@ -1316,7 +1358,9 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
               )}
             </AnimatePresence>
           </div>
+        </motion.div>
 
+        <div className="flex flex-col gap-4">
           {/* Service-unavailable (out of credits) — non-retryable, no Retry button */}
           {creditsExhausted && (
             <div className="bg-error/10 border border-error/40 rounded-xl px-4 py-3 flex items-start gap-3">
@@ -1368,9 +1412,9 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
               ? "Add a reference image to generate"
               : "✦ Generate Tattoo Designs"}
           </motion.button>
-        </motion.div>
+        </div>
 
-        </>} {/* end designMode === "ai" Input Card */}
+        </>} {/* end designMode === "ai" */}
 
         {(designMode === "ai") && <>
 
@@ -1908,24 +1952,13 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
 // body the tattoo will live so the model picks an appropriate aspect/flow.
 // Empty value = no hint, AI generates as before.
 
-const BODY_AREA_CHIPS = [
-  "Forearm",
-  "Upper Arm",
-  "Shoulder",
-  "Wrist",
-  "Chest",
-  "Back",
-  "Ribs",
-  "Thigh",
-  "Calf",
-  "Ankle",
-  "Neck",
-  "Half Sleeve",
-  "Outer Full Sleeve",
-  "Half Leg",
-  "Outer Full Leg",
-  "Full Back",
+const BODY_AREA_GROUPS = [
+  { label: "Arms", chips: ["Wrist", "Forearm", "Upper Arm", "Shoulder", "Half Sleeve", "Outer Full Sleeve"] },
+  { label: "Legs", chips: ["Ankle", "Calf", "Thigh", "Half Leg", "Outer Full Leg"] },
+  { label: "Torso & Neck", chips: ["Chest", "Ribs", "Back", "Full Back", "Neck"] },
 ] as const;
+
+const BODY_AREA_CHIPS = BODY_AREA_GROUPS.flatMap((g) => g.chips);
 
 function BodyAreaPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const isPreset = (BODY_AREA_CHIPS as readonly string[]).includes(value);
@@ -1969,37 +2002,49 @@ function BodyAreaPicker({ value, onChange }: { value: string; onChange: (v: stri
         )}
       </div>
 
-      <div className="flex flex-wrap gap-1.5">
-        {BODY_AREA_CHIPS.map((label) => {
-          const selected = value === label;
-          return (
-            <button
-              key={label}
-              type="button"
-              onClick={() => pickPreset(label)}
-              aria-pressed={selected}
-              className={`px-3 py-1.5 rounded-full text-xs font-mono border transition-colors cursor-pointer ${
-                selected
-                  ? "bg-gold text-bg border-gold"
-                  : "bg-bg text-muted border-cleo-border hover:border-gold/40 hover:text-ink"
-              }`}
-            >
-              {label}
-            </button>
-          );
-        })}
-        <button
-          type="button"
-          onClick={toggleCustom}
-          aria-pressed={customOpen}
-          className={`px-3 py-1.5 rounded-full text-xs font-mono border transition-colors cursor-pointer ${
-            customOpen || (!isPreset && value !== "")
-              ? "bg-gold text-bg border-gold"
-              : "bg-bg text-muted border-cleo-border hover:border-gold/40 hover:text-ink"
-          }`}
-        >
-          Custom…
-        </button>
+      <div className="flex flex-col gap-2.5">
+        {BODY_AREA_GROUPS.map((group) => (
+          <div key={group.label} className="flex items-center gap-2 flex-wrap">
+            <span className="text-[9px] font-mono text-muted/50 uppercase tracking-wider w-[4.5rem] flex-shrink-0">
+              {group.label}
+            </span>
+            {group.chips.map((label) => {
+              const selected = value === label;
+              return (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => pickPreset(label)}
+                  aria-pressed={selected}
+                  className={`px-3 py-1.5 rounded-full text-xs font-mono border transition-colors cursor-pointer ${
+                    selected
+                      ? "bg-gold text-bg border-gold"
+                      : "bg-bg text-muted border-cleo-border hover:border-gold/40 hover:text-ink"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[9px] font-mono text-muted/50 uppercase tracking-wider w-[4.5rem] flex-shrink-0">
+            Other
+          </span>
+          <button
+            type="button"
+            onClick={toggleCustom}
+            aria-pressed={customOpen}
+            className={`px-3 py-1.5 rounded-full text-xs font-mono border transition-colors cursor-pointer ${
+              customOpen || (!isPreset && value !== "")
+                ? "bg-gold text-bg border-gold"
+                : "bg-bg text-muted border-cleo-border hover:border-gold/40 hover:text-ink"
+            }`}
+          >
+            Custom…
+          </button>
+        </div>
       </div>
 
       {customOpen && (
