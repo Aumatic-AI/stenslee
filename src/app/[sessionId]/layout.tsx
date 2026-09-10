@@ -26,7 +26,7 @@ export default function SessionLayout({
 
   return (
     <div className="min-h-screen bg-bg flex flex-col">
-      <header className="bg-surface border-b border-cleo-border px-4 sm:px-6 py-3 flex items-center gap-4">
+      <header className="sticky top-0 z-30 bg-surface border-b border-cleo-border px-4 sm:px-6 py-3 flex items-center gap-4">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2.5 flex-shrink-0">
           <div className="w-6 h-6 relative">
