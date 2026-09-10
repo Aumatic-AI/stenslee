@@ -8,6 +8,8 @@ import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 import type { StaffMember } from "@/lib/staff-types";
 import Link from "next/link";
 
+const SESSIONS_PAGE_SIZE = 10;
+
 interface SessionRow {
   id: string;
   tattoo_style: string | null;
@@ -23,8 +25,10 @@ export default function AdminDashboard() {
 
   const [admin, setAdmin] = useState<StaffMember | null>(null);
   const [recentSessions, setRecentSessions] = useState<SessionRow[]>([]);
+  const [totalSessionCount, setTotalSessionCount] = useState(0);
   const [stats, setStats] = useState({ totalDesigners: 0, activeDesigners: 0, totalCustomers: 0, finalDesigns: 0 });
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -38,9 +42,9 @@ export default function AdminDashboard() {
       fetch("/api/studio/designers"),
       supabase
         .from("sessions")
-        .select("id, tattoo_style, status, created_at, users(first_name), designer:designer_id(name)")
+        .select("id, tattoo_style, status, created_at, users(first_name), designer:designer_id(name)", { count: "exact" })
         .order("created_at", { ascending: false })
-        .limit(5),
+        .range(0, SESSIONS_PAGE_SIZE - 1),
       supabase.from("users").select("id", { count: "exact", head: true }),
       supabase.from("tattoo_designs").select("id", { count: "exact", head: true }).eq("is_finalized", true),
     ]);
@@ -70,9 +74,9 @@ export default function AdminDashboard() {
       }));
     }
 
-    if (sessionsRes.data) {
-      setRecentSessions(sessionsRes.data as unknown as SessionRow[]);
-    }
+    const rows = (sessionsRes.data ?? []) as unknown as SessionRow[];
+    setRecentSessions(rows);
+    setTotalSessionCount(sessionsRes.count ?? rows.length);
 
     setStats((prev) => ({
       ...prev,
@@ -85,8 +89,26 @@ export default function AdminDashboard() {
 
   useEffect(() => { load(); }, [load]);
 
+  async function handleLoadMoreSessions() {
+    if (loadingMore) return;
+    setLoadingMore(true);
+    const { data } = await supabase
+      .from("sessions")
+      .select("id, tattoo_style, status, created_at, users(first_name), designer:designer_id(name)")
+      .order("created_at", { ascending: false })
+      .range(recentSessions.length, recentSessions.length + SESSIONS_PAGE_SIZE - 1);
+
+    const rows = (data ?? []) as unknown as SessionRow[];
+    setRecentSessions((prev) => [...prev, ...rows]);
+    setLoadingMore(false);
+  }
+
+  const hasMoreSessions = recentSessions.length < totalSessionCount;
+
   async function handleLogout() {
-    await supabase.auth.signOut();
+    // scope: "local" clears this device's session without a server round
+    // trip — a dropped connection there must never leave the cookie intact.
+    await supabase.auth.signOut({ scope: "local" });
     router.push("/studio/login");
     router.refresh();
   }
@@ -162,7 +184,7 @@ export default function AdminDashboard() {
           <div className="flex items-center gap-3">
             <h2 className="font-cinzel text-sm font-bold tracking-[0.18em] text-muted uppercase">Recent Sessions</h2>
             <div className="flex-1 h-px bg-cleo-border" />
-            <span className="text-[10px] font-mono text-muted">Last 5</span>
+            <span className="text-[10px] font-mono text-muted">{recentSessions.length} of {totalSessionCount}</span>
           </div>
 
           {recentSessions.length === 0 ? (
@@ -196,6 +218,15 @@ export default function AdminDashboard() {
                   </Link>
                 );
               })}
+              {hasMoreSessions && (
+                <button
+                  onClick={handleLoadMoreSessions}
+                  disabled={loadingMore}
+                  className="mt-1 py-2.5 text-center text-xs font-mono uppercase tracking-widest text-gold hover:text-gold-light border border-cleo-border hover:border-gold/40 rounded-xl transition-colors cursor-pointer disabled:opacity-60"
+                >
+                  {loadingMore ? "Loading…" : "Load More"}
+                </button>
+              )}
             </div>
           )}
         </motion.div>
