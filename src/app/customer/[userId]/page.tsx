@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
+import Image from "next/image";
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 import { useAppStore } from "@/store/app-store";
@@ -26,8 +27,17 @@ function TattooThumb({ url, alt }: { url: string; alt: string }) {
       </div>
     );
   }
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img src={url} alt={alt} className="w-full h-full object-cover" onError={() => setErrored(true)} />;
+  return (
+    <Image
+      src={url}
+      alt={alt}
+      fill
+      unoptimized
+      sizes="96px"
+      className="object-cover"
+      onError={() => setErrored(true)}
+    />
+  );
 }
 
 interface UserProfile {
@@ -432,7 +442,7 @@ function CustomerDashboardInner() {
                           { url: bodyUrl, label: "On Body" },
                         ].map(({ url, label }) => (
                           <div key={label} className="flex flex-col gap-1.5 items-center">
-                            <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-xl overflow-hidden bg-surface-2 border border-cleo-border group-hover:border-gold/30 transition-colors">
+                            <div className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-xl overflow-hidden bg-surface-2 border border-cleo-border group-hover:border-gold/30 transition-colors">
                               {url ? (
                                 <TattooThumb url={url} alt={label} />
                               ) : (

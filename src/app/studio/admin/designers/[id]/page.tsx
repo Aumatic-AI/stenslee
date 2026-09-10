@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
+import { useState, useEffect, use, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
+import Image from "next/image";
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 import type { StaffMember } from "@/lib/staff-types";
@@ -50,6 +51,117 @@ export default function DesignerDetailPage({ params }: { params: Promise<{ id: s
   const [lastSetPassword, setLastSetPassword] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [viewingImage, setViewingImage] = useState<string | null>(null);
+
+  // Edit designer modal (name, email, photo, active status) — same modal as
+  // the Designers list page, so admins get one consistent editing experience.
+  const [editOpen, setEditOpen] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [editActive, setEditActive] = useState(true);
+  const [editAvatarPreview, setEditAvatarPreview] = useState<string | null>(null);
+  const [editAvatarBase64, setEditAvatarBase64] = useState<string | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState("");
+  const editAvatarInputRef = useRef<HTMLInputElement>(null);
+
+  function openEdit() {
+    if (!designer) return;
+    setEditName(designer.name);
+    setEditEmail(designer.email);
+    setEditActive(designer.is_active);
+    setEditAvatarPreview(designer.avatar_url ?? null);
+    setEditAvatarBase64(null);
+    setEditError("");
+    setEditOpen(true);
+  }
+
+  function closeEdit() {
+    if (editSaving) return;
+    setEditOpen(false);
+  }
+
+  function handlePickEditAvatar(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      setEditAvatarBase64(result);
+      setEditAvatarPreview(result);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function handleSaveEdit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!designer) return;
+
+    const name = editName.trim();
+    const email = editEmail.trim();
+    if (!name || !email) {
+      setEditError("Name and email are required");
+      return;
+    }
+
+    setEditSaving(true);
+    setEditError("");
+
+    const nameChanged = name !== designer.name;
+    const emailChanged = email !== designer.email;
+    const activeChanged = editActive !== designer.is_active;
+    const avatarChanged = !!editAvatarBase64;
+
+    let updated: StaffMember | null = null;
+
+    if (emailChanged || avatarChanged) {
+      // Changing the login email needs the Supabase Admin API, and the
+      // photo upload needs the storage service role — both only available
+      // server-side. Only take this path when one of them actually changed.
+      const res = await fetch("/api/studio/designers", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: designer.id,
+          ...(nameChanged ? { name } : {}),
+          ...(emailChanged ? { email } : {}),
+          ...(activeChanged ? { is_active: editActive } : {}),
+          ...(avatarChanged ? { avatarBase64: editAvatarBase64 } : {}),
+        }),
+      });
+
+      if (!res.ok) {
+        const { error } = await res.json().catch(() => ({ error: "Failed to save changes" }));
+        setEditError(error ?? "Failed to save changes");
+        setEditSaving(false);
+        return;
+      }
+      ({ staff: updated } = await res.json() as { staff: StaffMember });
+    } else if (nameChanged || activeChanged) {
+      // A plain name/active-status change — RLS already grants admins
+      // direct write access to `staff`, so this skips the API route.
+      const updates: { name?: string; is_active?: boolean } = {};
+      if (nameChanged) updates.name = name;
+      if (activeChanged) updates.is_active = editActive;
+
+      const { data, error } = await supabase
+        .from("staff")
+        .update(updates)
+        .eq("id", designer.id)
+        .select("id, email, name, role, is_active, created_at, avatar_url")
+        .single();
+
+      if (error) {
+        setEditError("Failed to save changes");
+        setEditSaving(false);
+        return;
+      }
+      updated = data as StaffMember;
+    }
+
+    if (updated) setDesigner((prev) => (prev ? { ...prev, ...updated } : prev));
+    setEditSaving(false);
+    setEditOpen(false);
+  }
 
   function generatePassword() {
     const charset = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
@@ -108,28 +220,26 @@ export default function DesignerDetailPage({ params }: { params: Promise<{ id: s
         .from("staff").select("role").eq("id", user.id).maybeSingle();
       if (selfStaff?.role !== "admin") { router.push("/studio/designer"); return; }
 
-      // Load designer info
-      const { data: designerRow } = await supabase
-        .from("staff")
-        .select("id, email, name, role, is_active, created_at")
-        .eq("id", id)
-        .maybeSingle();
+      const [designerRes, sessionsRes] = await Promise.all([
+        supabase
+          .from("staff")
+          .select("id, email, name, role, is_active, created_at, avatar_url")
+          .eq("id", id)
+          .maybeSingle(),
+        supabase
+          .from("sessions")
+          .select(`
+            id, tattoo_style, tattoo_description, status, created_at, completed_at,
+            users(first_name, phone),
+            tattoo_designs(image_url, style_name, is_finalized)
+          `)
+          .eq("designer_id", id)
+          .order("created_at", { ascending: false }),
+      ]);
 
-      if (!designerRow) { setNotFound(true); setLoading(false); return; }
-      setDesigner(designerRow as StaffMember);
-
-      // Load all sessions for this designer with finalized designs
-      const { data: sessionRows } = await supabase
-        .from("sessions")
-        .select(`
-          id, tattoo_style, tattoo_description, status, created_at, completed_at,
-          users(first_name, phone),
-          tattoo_designs(image_url, style_name, is_finalized)
-        `)
-        .eq("designer_id", id)
-        .order("created_at", { ascending: false });
-
-      setSessions((sessionRows ?? []) as unknown as SessionRow[]);
+      if (!designerRes.data) { setNotFound(true); setLoading(false); return; }
+      setDesigner(designerRes.data as StaffMember);
+      setSessions((sessionsRes.data ?? []) as unknown as SessionRow[]);
       setLoading(false);
     }
     load();
@@ -141,7 +251,7 @@ export default function DesignerDetailPage({ params }: { params: Promise<{ id: s
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-bg flex items-center justify-center">
+      <div className="flex-1 flex items-center justify-center">
         <div className="w-8 h-8 border-2 border-gold border-t-transparent rounded-full animate-spin" />
       </div>
     );
@@ -149,9 +259,9 @@ export default function DesignerDetailPage({ params }: { params: Promise<{ id: s
 
   if (notFound) {
     return (
-      <div className="min-h-screen bg-bg flex flex-col items-center justify-center gap-4">
+      <div className="flex-1 flex flex-col items-center justify-center gap-4">
         <p className="font-cinzel text-xl text-ink">Designer not found.</p>
-        <Link href="/studio/admin" className="text-gold underline font-mono text-sm">Back to admin</Link>
+        <Link href="/studio/admin/designers" className="text-gold underline font-mono text-sm">Back to designers</Link>
       </div>
     );
   }
@@ -160,13 +270,13 @@ export default function DesignerDetailPage({ params }: { params: Promise<{ id: s
   const activeSessions = sessions.filter((s) => s.status === "active");
 
   return (
-    <div className="min-h-[100dvh] bg-bg flex flex-col">
+    <div className="flex-1 flex flex-col">
       <header className="px-4 sm:px-6 pt-5 pb-4 border-b border-cleo-border flex items-center gap-3">
-        <Link href="/studio/admin" className="text-muted hover:text-gold transition-colors text-xs font-mono tracking-wider flex items-center gap-1.5">
+        <Link href="/studio/admin/designers" className="text-muted hover:text-gold transition-colors text-xs font-mono tracking-wider flex items-center gap-1.5">
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
-          Admin
+          Designers
         </Link>
         <span className="text-cleo-border">/</span>
         <span className="text-muted text-xs font-mono truncate">{designer?.name}</span>
@@ -177,8 +287,12 @@ export default function DesignerDetailPage({ params }: { params: Promise<{ id: s
         {/* Designer profile */}
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
           className="bg-surface border border-cleo-border rounded-2xl p-5 sm:p-6 flex items-center gap-5">
-          <div className="w-14 h-14 rounded-full bg-gold/10 border border-gold/30 flex items-center justify-center flex-shrink-0">
-            <span className="font-cinzel text-2xl font-black text-gold">{designer?.name.charAt(0).toUpperCase()}</span>
+          <div className="relative w-14 h-14 rounded-full bg-gold/10 border border-gold/30 flex items-center justify-center flex-shrink-0 overflow-hidden">
+            {designer?.avatar_url ? (
+              <Image src={designer.avatar_url} alt={designer.name} fill unoptimized className="object-cover" />
+            ) : (
+              <span className="font-cinzel text-2xl font-black text-gold">{designer?.name.charAt(0).toUpperCase()}</span>
+            )}
           </div>
           <div className="flex-1 min-w-0">
             <h1 className="font-cinzel text-xl font-black text-ink">{designer?.name}</h1>
@@ -192,12 +306,20 @@ export default function DesignerDetailPage({ params }: { params: Promise<{ id: s
               <p className="font-cinzel text-3xl font-black text-gold leading-none">{sessions.length}</p>
               <p className="text-muted text-[10px] font-mono uppercase tracking-widest mt-1">Total Sessions</p>
             </div>
-            <button
-              onClick={() => { setResetOpen(true); setResetError(null); setLastSetPassword(null); }}
-              className="px-3 py-1.5 text-[10px] font-cinzel font-bold tracking-[0.15em] uppercase rounded-lg border border-gold/40 text-gold hover:bg-gold/10 transition-colors cursor-pointer"
-            >
-              Reset Password
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={openEdit}
+                className="px-3 py-1.5 text-[10px] font-cinzel font-bold tracking-[0.15em] uppercase rounded-lg border border-cleo-border text-muted hover:text-gold hover:border-gold/40 transition-colors cursor-pointer"
+              >
+                Edit Profile
+              </button>
+              <button
+                onClick={() => { setResetOpen(true); setResetError(null); setLastSetPassword(null); }}
+                className="px-3 py-1.5 text-[10px] font-cinzel font-bold tracking-[0.15em] uppercase rounded-lg border border-gold/40 text-gold hover:bg-gold/10 transition-colors cursor-pointer"
+              >
+                Reset Password
+              </button>
+            </div>
           </div>
         </motion.div>
 
@@ -429,6 +551,123 @@ export default function DesignerDetailPage({ params }: { params: Promise<{ id: s
           )}
         </motion.div>
       </div>
+
+      {/* Edit designer modal */}
+      <AnimatePresence>
+        {editOpen && designer && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-bg/80 backdrop-blur-sm flex items-center justify-center p-4"
+            onClick={closeEdit}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              transition={{ duration: 0.2 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-surface border border-cleo-border rounded-2xl p-6 w-full max-w-sm flex flex-col gap-4"
+            >
+              <div className="flex items-center justify-between">
+                <h2 className="font-cinzel text-lg font-black text-ink">Edit Designer</h2>
+                <button onClick={closeEdit} className="text-muted hover:text-ink transition-colors cursor-pointer">
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveEdit} className="flex flex-col gap-4">
+                <div className="flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => editAvatarInputRef.current?.click()}
+                    className="relative w-20 h-20 rounded-full bg-gold/10 border border-gold/20 flex items-center justify-center overflow-hidden group cursor-pointer"
+                  >
+                    {editAvatarPreview ? (
+                      <Image src={editAvatarPreview} alt="" fill unoptimized className="object-cover" />
+                    ) : (
+                      <span className="font-cinzel text-2xl font-black text-gold">
+                        {editName.charAt(0).toUpperCase()}
+                      </span>
+                    )}
+                    <div className="absolute inset-0 bg-bg/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <svg className="w-5 h-5 text-ink" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                    </div>
+                  </button>
+                  <input
+                    ref={editAvatarInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handlePickEditAvatar}
+                    className="hidden"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-muted text-[11px] font-mono uppercase tracking-wider">Name</label>
+                  <input
+                    type="text"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    className="w-full bg-bg border border-cleo-border rounded-lg px-3.5 py-2.5 text-ink text-sm focus:outline-none focus:border-gold transition-colors"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-muted text-[11px] font-mono uppercase tracking-wider">Email</label>
+                  <input
+                    type="email"
+                    value={editEmail}
+                    onChange={(e) => setEditEmail(e.target.value)}
+                    className="w-full bg-bg border border-cleo-border rounded-lg px-3.5 py-2.5 text-ink text-sm focus:outline-none focus:border-gold transition-colors"
+                  />
+                  <p className="text-muted/60 text-[10px]">Changing this changes the login email too.</p>
+                </div>
+
+                <div className="flex items-center justify-between bg-bg border border-cleo-border rounded-lg px-3.5 py-2.5">
+                  <span className="text-ink text-sm">Active</span>
+                  <button
+                    type="button"
+                    onClick={() => setEditActive((v) => !v)}
+                    className={`relative w-11 h-6 rounded-full border transition-colors cursor-pointer ${
+                      editActive ? "bg-success/20 border-success/40" : "bg-cleo-border border-cleo-border"
+                    }`}
+                  >
+                    <span className={`absolute top-0.5 w-5 h-5 rounded-full transition-all ${
+                      editActive ? "left-5 bg-success" : "left-0.5 bg-muted"
+                    }`} />
+                  </button>
+                </div>
+
+                {editError && <p className="text-error text-xs">{editError}</p>}
+
+                <div className="flex gap-3 mt-1">
+                  <button
+                    type="button"
+                    onClick={closeEdit}
+                    className="flex-1 py-2.5 text-center text-xs font-mono uppercase tracking-widest text-muted border border-cleo-border rounded-xl transition-colors cursor-pointer hover:text-ink"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={editSaving}
+                    className="flex-1 py-2.5 text-center text-xs font-mono uppercase tracking-widest text-bg bg-gold hover:bg-gold-light rounded-xl transition-colors cursor-pointer disabled:opacity-60"
+                  >
+                    {editSaving ? "Saving…" : "Save"}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {viewingImage && (
