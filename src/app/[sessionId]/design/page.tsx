@@ -1085,6 +1085,7 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
             </AnimatePresence>
           </div>
 
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
           {/* Text tattoo toggle */}
           <div className="flex items-center gap-3 p-3 bg-bg rounded-xl border border-cleo-border">
             <div className="flex-1 min-w-0">
@@ -1176,6 +1177,7 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
                 +
               </button>
             </div>
+          </div>
           </div>
 
           {showColorModal && (
