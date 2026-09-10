@@ -109,9 +109,9 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
   }
 
   return (
-    <div className="h-[100dvh] bg-bg flex flex-col sm:flex-row overflow-hidden">
+    <div className="h-[100dvh] min-h-0 bg-bg flex flex-col sm:flex-row overflow-hidden">
       {/* Sidebar — desktop/tablet. Fixed in place; only <main> scrolls. */}
-      <aside className="hidden sm:flex sm:flex-col w-56 flex-shrink-0 border-r border-cleo-border bg-surface/40 px-4 py-6 gap-6 overflow-y-auto">
+      <aside className="hidden sm:flex sm:flex-col w-56 flex-shrink-0 min-h-0 border-r border-cleo-border bg-surface/40 px-4 py-6 gap-6 overflow-y-auto">
         <div className="flex items-center gap-2.5 px-2">
           <div className="w-7 h-7 relative flex-shrink-0">
             <Image src="/cleopatra-logo.svg" alt="Cleopatra" fill className="object-contain" />
@@ -201,7 +201,7 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
       </div>
 
       {/* Page content */}
-      <main className="flex-1 min-w-0 flex flex-col overflow-y-auto">{children}</main>
+      <main className="flex-1 min-w-0 min-h-0 flex flex-col overflow-y-auto">{children}</main>
     </div>
   );
 }
