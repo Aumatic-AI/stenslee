@@ -237,7 +237,19 @@ export interface StencilExportOptions {
   filename?: string;
   /** Safe-area margin in mm. Defaults to STENCIL_MARGIN_MM (2mm). */
   marginMm?: number;
+  /**
+   * CSS brightness() percent applied to the ink — 100 = normal, below 100
+   * darker, above 100 lighter. Defaults to DEFAULT_BRIGHTNESS (100).
+   */
+  brightness?: number;
 }
+
+// Ink darkness/lightness adjustment — a plain brightness filter on the
+// stencil image, applied identically to the on-screen preview and every
+// export format so what you see is what prints.
+export const DEFAULT_BRIGHTNESS = 100;
+export const MIN_BRIGHTNESS = 50; // darkest
+export const MAX_BRIGHTNESS = 150; // lightest
 
 const EXPORT_DPI = 150; // plenty for a ~1K source design; higher adds file size, not detail
 
@@ -246,12 +258,14 @@ function drawInstance(
   ctx: CanvasRenderingContext2D,
   img: HTMLImageElement,
   inst: StencilInstance,
-  dx: number, dy: number, dw: number, dh: number
+  dx: number, dy: number, dw: number, dh: number,
+  brightness: number = DEFAULT_BRIGHTNESS
 ) {
   ctx.save();
   ctx.translate(dx + dw / 2, dy + dh / 2);
   if (inst.mirrored) ctx.scale(-1, 1);
   if (inst.rotation) ctx.rotate((inst.rotation * Math.PI) / 180);
+  ctx.filter = brightness !== DEFAULT_BRIGHTNESS ? `brightness(${brightness}%)` : "none";
   ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
   ctx.restore();
 }
@@ -272,6 +286,7 @@ export async function downloadTattooStencilPdf({
   subtitle,
   filename = "tattoo-stencil.pdf",
   marginMm = STENCIL_MARGIN_MM,
+  brightness = DEFAULT_BRIGHTNESS,
 }: StencilExportOptions): Promise<void> {
   const img = image ?? (await loadStencilImage(imageUrl));
   const aspect = img.naturalWidth > 0 && img.naturalHeight > 0 ? img.naturalWidth / img.naturalHeight : 1;
@@ -308,7 +323,8 @@ export async function downloadTattooStencilPdf({
           (tattooLeft - col * pageSize.w) * pxPerMm,
           (tattooTop - row * pageSize.h) * pxPerMm,
           tattooW * pxPerMm,
-          tattooH * pxPerMm
+          tattooH * pxPerMm,
+          brightness
         );
       }
 
@@ -379,6 +395,7 @@ export async function downloadTattooStencilImage({
   image,
   filename = "tattoo-stencil.png",
   format = "png",
+  brightness = DEFAULT_BRIGHTNESS,
 }: StencilExportOptions & { format?: "png" | "jpeg" }): Promise<void> {
   const img = image ?? (await loadStencilImage(imageUrl));
   const aspect = img.naturalWidth > 0 && img.naturalHeight > 0 ? img.naturalWidth / img.naturalHeight : 1;
@@ -399,7 +416,7 @@ export async function downloadTattooStencilImage({
 
   for (let ii = 0; ii < instances.length; ii++) {
     const { tattooLeft, tattooTop, tattooW, tattooH } = layouts[ii];
-    drawInstance(ctx, img, instances[ii], tattooLeft * pxPerMm, tattooTop * pxPerMm, tattooW * pxPerMm, tattooH * pxPerMm);
+    drawInstance(ctx, img, instances[ii], tattooLeft * pxPerMm, tattooTop * pxPerMm, tattooW * pxPerMm, tattooH * pxPerMm, brightness);
   }
 
   const mime = format === "jpeg" ? "image/jpeg" : "image/png";

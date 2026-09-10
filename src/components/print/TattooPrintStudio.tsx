@@ -10,6 +10,9 @@ import {
   DEFAULT_SIZE_MM,
   MIN_SIZE_MM,
   MAX_SIZE_MM,
+  DEFAULT_BRIGHTNESS,
+  MIN_BRIGHTNESS,
+  MAX_BRIGHTNESS,
   mmToUnit,
   unitToMm,
   computeStencilLayout,
@@ -46,6 +49,7 @@ export default function TattooPrintStudio({ imageUrl, subtitle, filenameBase = "
   const [pageFormat, setPageFormat] = useState<PageFormat>(DEFAULT_PAGE_FORMAT);
   const [exportFormat, setExportFormat] = useState<ExportFormat>("pdf");
   const [sizeUnit, setSizeUnit] = useState<SizeUnit>("in");
+  const [brightness, setBrightness] = useState(DEFAULT_BRIGHTNESS);
   const [isPageSizeOpen, setIsPageSizeOpen] = useState(false);
   const pageSizeRef = useRef<HTMLDivElement>(null);
 
@@ -215,6 +219,7 @@ export default function TattooPrintStudio({ imageUrl, subtitle, filenameBase = "
         instances: instances.map(({ center, sizeMm, rotation, mirrored }) => ({ center, sizeMm, rotation, mirrored })),
         subtitle,
         marginMm,
+        brightness,
       };
       if (exportFormat === "pdf") {
         await downloadTattooStencilPdf({
@@ -343,6 +348,7 @@ export default function TattooPrintStudio({ imageUrl, subtitle, filenameBase = "
                       transform: `${inst.mirrored ? "scaleX(-1) " : ""}rotate(${inst.rotation}deg)`,
                       touchAction: "none",
                       objectFit: "contain",
+                      filter: brightness !== DEFAULT_BRIGHTNESS ? `brightness(${brightness}%)` : undefined,
                       outline: isSelected ? "2px solid rgba(201,168,76,0.85)" : "none",
                       outlineOffset: "3px",
                     }}
@@ -604,6 +610,33 @@ export default function TattooPrintStudio({ imageUrl, subtitle, filenameBase = "
             </div>
             <p className="text-muted/50 text-[10px] font-mono leading-snug">
               Grey border inset shown in preview. Printed in the PDF only — PNG/JPEG exports are the flat design with no guide lines.
+            </p>
+          </div>
+
+          {/* Ink darkness */}
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] font-mono tracking-[0.15em] uppercase text-muted">Ink darkness</label>
+              <span className="text-gold text-xs font-mono font-bold">
+                {brightness === DEFAULT_BRIGHTNESS ? "Normal" : `${brightness}%`}
+              </span>
+            </div>
+            <input
+              type="range"
+              min={MIN_BRIGHTNESS}
+              max={MAX_BRIGHTNESS}
+              step={5}
+              value={brightness}
+              onChange={(e) => setBrightness(Number(e.target.value))}
+              className="w-full accent-gold cursor-pointer"
+            />
+            <div className="flex justify-between text-[9px] font-mono text-muted/40">
+              <span>Darker</span>
+              <span>Normal</span>
+              <span>Lighter</span>
+            </div>
+            <p className="text-muted/50 text-[10px] font-mono leading-snug">
+              Adjusts how dark or light the ink prints — matches faded or heavily saturated reference designs. Applied to the preview and every export.
             </p>
           </div>
 
