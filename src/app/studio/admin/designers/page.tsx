@@ -85,16 +85,16 @@ function DesignersPageInner() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Live search — queries Supabase directly, debounced like the customer
-  // search elsewhere in the app.
+  // Live search — queries Supabase directly on every keystroke, no debounce.
   useEffect(() => {
     const q = query.trim();
     if (!q) {
       setSearchResults(null);
       return;
     }
+    let cancelled = false;
     setSearching(true);
-    const timer = setTimeout(async () => {
+    (async () => {
       const { data, error } = await supabase
         .from("staff")
         .select(DESIGNER_SELECT)
@@ -103,6 +103,7 @@ function DesignersPageInner() {
         .ilike("name", `%${q}%`)
         .order("name", { ascending: true });
 
+      if (cancelled) return;
       if (error) {
         setSearchResults([]);
       } else {
@@ -111,8 +112,8 @@ function DesignersPageInner() {
         setSearchResults((data ?? []).map((s) => ({ ...s, session_count: countMap[s.id] ?? 0 })) as DesignerRow[]);
       }
       setSearching(false);
-    }, 500);
-    return () => clearTimeout(timer);
+    })();
+    return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
