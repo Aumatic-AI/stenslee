@@ -312,6 +312,35 @@ on conflict (id) do nothing;
 -- Monitor: select * from cron.job_run_details order by start_time desc limit 20;
 -- Remove:  select cron.unschedule('cleanup-expired-sessions');
 
+-- ── AGGREGATE VIEWS (performance) ────────────────────────────
+-- Let the admin panel ask Postgres for pre-counted totals instead of
+-- downloading every session row and counting in JavaScript.
+-- security_invoker = true makes each view honor the RLS policies already
+-- defined on `sessions` — no new grants needed.
+
+create or replace view public.designer_session_counts
+with (security_invoker = true) as
+select designer_id, count(*)::int as session_count
+from public.sessions
+where designer_id is not null
+group by designer_id;
+
+-- Counts only COMPLETED sessions (not active/in-progress ones) so this
+-- number always matches what actually shows up in that customer's Tattoo
+-- History on their profile page. last_session_at uses completed_at (when
+-- the tattoo was finished) rather than created_at (when the session
+-- merely started), for the same reason.
+create or replace view public.customer_session_stats
+with (security_invoker = true) as
+select
+  user_id,
+  count(*)::int as session_count,
+  max(completed_at) as last_session_at
+from public.sessions
+where user_id is not null
+  and status = 'completed'
+group by user_id;
+
 -- ── CUSTOMER SEARCH (name + phone, partial match) ────────────
 -- Used by the designer dashboard's live customer lookup. Matches on
 -- first_name OR phone as a substring; the phone side compares digits only

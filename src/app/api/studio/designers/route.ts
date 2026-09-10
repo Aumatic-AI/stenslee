@@ -1,25 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient, createServiceClient } from "@/lib/supabase-server";
-
-// GET /api/studio/designers — list all staff (admin only)
-export async function GET() {
-  const supabase = await createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const service = createServiceClient();
-  const { data: requester } = await service.from("staff").select("role").eq("id", user.id).maybeSingle();
-  if (requester?.role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-
-  const { data, error } = await service
-    .from("staff")
-    .select("id, email, name, role, is_active, created_at")
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false });
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ staff: data });
-}
+import { uploadBase64 } from "@/lib/storage";
 
 // POST /api/studio/designers — create a new designer (admin only)
 export async function POST(req: NextRequest) {
@@ -63,7 +44,13 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ staff: staffRow }, { status: 201 });
 }
 
-// PATCH /api/studio/designers — toggle is_active (admin only)
+// PATCH /api/studio/designers — toggle is_active, and/or edit name/email/
+// photo (admin only). Every field is optional — only what's provided gets
+// updated, so the same endpoint serves both the quick active/inactive
+// toggle and the full "Edit" modal on the designers list. Stays a server
+// route because changing email requires the Supabase Admin API (service
+// role); a plain is_active/name-only change could go direct from the
+// client, but bundling it here keeps one consistent save path.
 export async function PATCH(req: NextRequest) {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -73,17 +60,46 @@ export async function PATCH(req: NextRequest) {
   const { data: requester } = await service.from("staff").select("role").eq("id", user.id).maybeSingle();
   if (requester?.role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const { id, is_active } = await req.json();
+  const { id, is_active, name, email, avatarBase64 } = await req.json();
   if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });
 
   // Prevent admin from deactivating themselves
-  if (id === user.id) {
+  if (typeof is_active === "boolean" && id === user.id) {
     return NextResponse.json({ error: "Cannot deactivate your own account" }, { status: 400 });
   }
 
-  const { error } = await service.from("staff").update({ is_active }).eq("id", id);
+  const updates: { is_active?: boolean; name?: string; email?: string; avatar_url?: string } = {};
+  if (typeof is_active === "boolean") updates.is_active = is_active;
+  if (typeof name === "string" && name.trim()) updates.name = name.trim();
+
+  if (typeof email === "string" && email.trim()) {
+    const newEmail = email.trim();
+    const { error: authError } = await service.auth.admin.updateUserById(id, { email: newEmail });
+    if (authError) return NextResponse.json({ error: authError.message }, { status: 400 });
+    updates.email = newEmail;
+  }
+
+  if (typeof avatarBase64 === "string" && avatarBase64) {
+    try {
+      updates.avatar_url = await uploadBase64(avatarBase64, id, "avatars");
+    } catch (err) {
+      return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    }
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
+  }
+
+  const { data, error } = await service
+    .from("staff")
+    .update(updates)
+    .eq("id", id)
+    .select("id, email, name, role, is_active, created_at, avatar_url")
+    .single();
+
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, staff: data });
 }
 
 // PUT /api/studio/designers — reset a designer's password (admin only).
