@@ -9,53 +9,35 @@
 export interface ReworkOptions {
   description: string;
   mode: "cover" | "extend";
-  style?: string;
-  colorHexes?: string[];
   /** Set when this is a chat edit turn on a prior rework result, not the first generation. */
   editInstruction?: string;
 }
 
-function buildStyleClause(style?: string): string {
-  return style?.trim() ? `Render the new artwork in a ${style.trim()} style.` : "";
-}
-
-function buildColorClause(colorHexes: string[] = []): string {
-  if (colorHexes.length === 0) return "Use black & grey ink only — no color fills.";
-  return `Use ONLY these ink colors for the new artwork: ${colorHexes.join(", ")}.`;
-}
-
 const MODE_INSTRUCTIONS: Record<ReworkOptions["mode"], string> = {
-  cover: "COVER-UP: Fully replace the existing tattoo with the new design. None of the old ink should remain visible — the new artwork must completely conceal it through its own linework, shading, and density.",
-  extend: "EXTEND: Keep the existing tattoo visible and build the new artwork around and with it, so the old and new ink read as one continuous, intentional piece.",
+  cover: "Fully replace the existing tattoo with the new design — none of the old ink should remain visible.",
+  extend: "Keep the existing tattoo visible and build the new artwork around and with it, so old and new ink read as one continuous piece.",
 };
 
 export function buildReworkPrompt(opts: ReworkOptions): string {
-  const { description, mode, style, colorHexes = [], editInstruction } = opts;
+  const { description, mode, editInstruction } = opts;
 
-  const task = editInstruction
-    ? `Apply this change to the tattoo photo: "${editInstruction.trim()}"`
-    : `New tattoo idea: ${description.trim()}`;
+  // Edit turns get a short, single-focus instruction on purpose — a long list
+  // of simultaneous DO/DON'T constraints measurably made the model worse at
+  // following the one thing that actually mattered (e.g. asking to add red
+  // ink while also being told "black & grey only" a few lines down). A
+  // terse instruction close to how a person would actually phrase it, on
+  // the actual photo, is what the equivalent image-edit tools do well with.
+  if (editInstruction) {
+    return `Image 1 is a photo of a real tattoo on skin. ${editInstruction.trim()} Keep everything else in the photo — the skin, body part, angle, lighting, and background — exactly as it is.`;
+  }
 
   return `
 You are a professional tattoo artist retouching a real photo of a customer's existing tattoo. Image 1 is a photo of skin with an existing tattoo on it.
 
 ${MODE_INSTRUCTIONS[mode]}
 
-${task}
+New tattoo idea: ${description.trim()}
 
-${buildStyleClause(style)}
-${buildColorClause(colorHexes)}
-
-DO:
-- Keep the same skin, body part, angle, lighting, and photo framing as Image 1 — only the tattoo ink changes.
-- Make the result look like a real, freshly-tattooed photograph, not a flat illustration or a copy-pasted overlay.
-- Match how ink actually sits on skin: it follows body contours, curves, and creases.
-
-DO NOT:
-- Do not change the person's skin tone, body shape, camera angle, or background.
-- Do not add a white background, canvas, or paper — this is a photo of skin, not a flat design.
-- Do not caption, label, or add any text/watermarks to the image.
-
-OUTPUT: One photorealistic photo, same framing as Image 1, showing only the tattoo ink changed.
+Keep the same skin, body part, angle, lighting, and photo framing as Image 1 — only the tattoo ink changes. Make the result look like a real, freshly-tattooed photograph, with ink that follows the body's contours, not a flat illustration or a copy-pasted overlay. Do not add a white background, canvas, or paper — this is a photo of skin. Do not add captions, labels, or watermarks.
 `.trim();
 }

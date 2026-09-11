@@ -40,8 +40,6 @@ export async function POST(req: NextRequest) {
     iteration,
     description = "",
     mode,
-    style = "",
-    colors = [] as string[],
     count = 5,
     sourcePhoto,       // base64 — first generation only
     sourcePhotoUrl,    // already-hosted — first generation, resumed session
@@ -86,8 +84,6 @@ export async function POST(req: NextRequest) {
   const prompt = buildReworkPrompt({
     description,
     mode,
-    style,
-    colorHexes: Array.isArray(colors) ? colors : [],
     editInstruction: isEdit ? editInstruction : undefined,
   });
 

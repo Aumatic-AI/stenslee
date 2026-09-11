@@ -245,7 +245,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
           const imageUrl = await uploadBase64Direct(slot.imageBase64, sessionId, prefix);
           const [persisted] = await persistDesigns(
             [{ id: `kei-${iteration}-${i}`, imageUrl, gradient: "", patternType: "mandala", styleName: `Variation ${i + 1}` }],
-            { parentDesignIds, userInstruction }
+            { iteration, parentDesignIds, userInstruction }
           );
           const row: DesignRow = {
             id: persisted.dbId ?? persisted.id,

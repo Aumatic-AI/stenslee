@@ -107,7 +107,7 @@ interface AppState {
   finishPlacement: (composite: string) => void;
   setPlacementDbId: (id: string | null) => void;
   // Supabase persistence
-  persistDesigns: (designs: DesignVariant[], meta?: { parentDesignIds?: string[]; userInstruction?: string }) => Promise<DesignVariant[]>;
+  persistDesigns: (designs: DesignVariant[], meta?: { iteration?: number; parentDesignIds?: string[]; userInstruction?: string }) => Promise<DesignVariant[]>;
   persistPlacement: (data: { placementText?: string; bodyPhotoUrl?: string; compositeUrl?: string }) => Promise<string | null>;
   finalizeSession: (designId: string, placementId: string) => Promise<void>;
   finalizeReworkSession: (designId: string) => Promise<void>;
@@ -343,7 +343,7 @@ export const useAppStore = create<AppState>()(
           image_url: d.imageUrl!,
           style_name: d.styleName,
           pattern_type: d.patternType,
-          iteration: iterationCount,
+          iteration: meta?.iteration ?? iterationCount,
           parent_design_ids: meta?.parentDesignIds ?? [],
           user_instruction: meta?.userInstruction ?? null,
         }))
