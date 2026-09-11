@@ -14,6 +14,13 @@ export interface Database {
         };
         Returns: void;
       };
+      finalize_rework_session: {
+        Args: {
+          p_session_id: string;
+          p_design_id: string;
+        };
+        Returns: void;
+      };
     };
     Tables: {
       users: {
@@ -39,6 +46,9 @@ export interface Database {
           user_id: string | null;
           tattoo_style: string | null;
           tattoo_description: string | null;
+          flow_type: "ai_design" | "rework";
+          rework_source_photo_url: string | null;
+          rework_mode: "cover" | "extend" | null;
           status: "active" | "completed" | "abandoned";
           created_at: string;
           completed_at: string | null;
@@ -48,6 +58,9 @@ export interface Database {
           user_id?: string | null;
           tattoo_style?: string | null;
           tattoo_description?: string | null;
+          flow_type?: "ai_design" | "rework";
+          rework_source_photo_url?: string | null;
+          rework_mode?: "cover" | "extend" | null;
           status?: "active" | "completed" | "abandoned";
           created_at?: string;
           completed_at?: string | null;
@@ -69,6 +82,8 @@ export interface Database {
           pattern_type: string | null;
           iteration: number;
           is_finalized: boolean;
+          parent_design_ids: string[];
+          user_instruction: string | null;
           created_at: string;
         };
         Insert: {
@@ -79,6 +94,8 @@ export interface Database {
           pattern_type?: string | null;
           iteration?: number;
           is_finalized?: boolean;
+          parent_design_ids?: string[];
+          user_instruction?: string | null;
           created_at?: string;
         };
         Update: {

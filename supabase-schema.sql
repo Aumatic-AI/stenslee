@@ -18,6 +18,7 @@ drop table if exists users            cascade;
 
 -- Drop existing functions
 drop function if exists finalize_session(text, uuid, uuid);
+drop function if exists finalize_rework_session(text, uuid);
 drop function if exists is_admin();
 drop function if exists is_designer();
 drop function if exists get_staff_role();
@@ -55,16 +56,20 @@ comment on table users is 'Customer accounts. Identified by phone number. No aut
 -- designer_id tracks which staff member handled it.
 -- Active sessions older than 3hr are auto-deleted by the cleanup cron.
 create table sessions (
-  id                  text        primary key,
-  user_id             uuid        references users(id) on delete set null,
-  designer_id         uuid        references staff(id) on delete set null,
-  tattoo_style        text,
-  tattoo_description  text,
-  target_body_area    text,
-  status              text        not null default 'active'
-                        check (status in ('active', 'completed', 'abandoned')),
-  created_at          timestamptz not null default now(),
-  completed_at        timestamptz
+  id                     text        primary key,
+  user_id                uuid        references users(id) on delete set null,
+  designer_id            uuid        references staff(id) on delete set null,
+  tattoo_style           text,
+  tattoo_description     text,
+  target_body_area       text,
+  flow_type              text        not null default 'ai_design'
+                           check (flow_type in ('ai_design', 'rework')),
+  rework_source_photo_url text,
+  rework_mode            text        check (rework_mode in ('cover', 'extend')),
+  status                 text        not null default 'active'
+                           check (status in ('active', 'completed', 'abandoned')),
+  created_at             timestamptz not null default now(),
+  completed_at           timestamptz
 );
 
 create index on sessions(user_id);
@@ -77,14 +82,19 @@ comment on table sessions is 'One row per tattoo design session. Active sessions
 -- ── 4. TATTOO DESIGNS ───────────────────────────────────────
 -- All generated variants stored. Non-finalized rows pruned on session completion.
 create table tattoo_designs (
-  id           uuid        primary key default uuid_generate_v4(),
-  session_id   text        not null references sessions(id) on delete cascade,
-  image_url    text        not null,
-  style_name   text,
-  pattern_type text,
-  iteration    int         not null default 1,
-  is_finalized boolean     not null default false,
-  created_at   timestamptz not null default now()
+  id                uuid        primary key default uuid_generate_v4(),
+  session_id        text        not null references sessions(id) on delete cascade,
+  image_url         text        not null,
+  style_name        text,
+  pattern_type      text,
+  iteration         int         not null default 1,
+  is_finalized      boolean     not null default false,
+  -- Chat-thread lineage: which prior design(s) this was edited from (empty for
+  -- an original generation batch), and the instruction that produced it (null
+  -- for an original batch — its "message" is the session's own description).
+  parent_design_ids uuid[]      not null default '{}',
+  user_instruction  text,
+  created_at        timestamptz not null default now()
 );
 
 create index on tattoo_designs(session_id);
@@ -213,6 +223,22 @@ begin
   exception when others then
     raise warning 'finalize_session analytics skipped (%): %', sqlstate, sqlerrm;
   end;
+end;
+$$;
+
+-- ── FUNCTION: finalize_rework_session ────────────────────────
+-- Rework (cover-up/extend) sessions never create a placements row — the
+-- generated image is already a finished on-skin photo. Same critical-path
+-- shape as finalize_session, minus the placement half.
+create or replace function finalize_rework_session(
+  p_session_id text,
+  p_design_id  uuid
+)
+returns void language plpgsql security definer as $$
+begin
+  update tattoo_designs set is_finalized = true where id = p_design_id;
+  delete from tattoo_designs where session_id = p_session_id and is_finalized = false;
+  update sessions set status = 'completed', completed_at = now() where id = p_session_id;
 end;
 $$;
 
