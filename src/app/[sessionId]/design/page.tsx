@@ -1059,53 +1059,6 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
               </div>
             </div>
 
-            {/* Style (optional) */}
-            <div className="flex flex-col gap-2">
-              <label className="text-xs font-mono tracking-[0.15em] uppercase text-muted">
-                Tattoo Style <span className="text-muted/50 normal-case">(optional)</span>
-              </label>
-              <StyleSelect value={tattooStyle} onChange={setTattooStyle} />
-            </div>
-
-            {/* Color palette (optional) — reuses the same picker as AI Design */}
-            <div className="flex flex-col gap-2 p-3 bg-bg rounded-xl border border-cleo-border">
-              <div className="flex items-center justify-between gap-3">
-                <label className="text-xs font-mono tracking-[0.15em] uppercase text-muted">
-                  Color Palette <span className="text-muted/40 normal-case">(optional)</span>
-                </label>
-                <div className="flex items-center gap-2 text-[10px] font-mono">
-                  <span className={selectedColors.length > 0 ? "text-gold" : "text-muted/60"}>
-                    {selectedColors.length === 0 ? "Black & grey" : `${selectedColors.length} ink${selectedColors.length === 1 ? "" : "s"}`}
-                  </span>
-                  {selectedColors.length > 0 && (
-                    <button onClick={() => clearColors()} className="text-muted hover:text-gold transition-colors uppercase tracking-wider cursor-pointer">
-                      Clear
-                    </button>
-                  )}
-                </div>
-              </div>
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {selectedColors.map((hex) => (
-                  <button
-                    key={hex}
-                    type="button"
-                    onClick={() => toggleColor(hex)}
-                    title={`${hex.toUpperCase()} — tap to remove`}
-                    className="relative flex-shrink-0 w-7 h-7 sm:w-8 sm:h-8 rounded-md cursor-pointer ring-1 ring-inset ring-gold shadow-[0_0_0_2px_rgba(201,168,76,0.35)] transition-transform hover:-translate-y-0.5"
-                    style={{ backgroundColor: hex }}
-                  >
-                    <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-error text-white text-[10px] flex items-center justify-center leading-none shadow-sm">×</span>
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => setShowColorModal(true)}
-                  className="flex-shrink-0 w-7 h-7 sm:w-8 sm:h-8 rounded-md border border-dashed border-cleo-border hover:border-gold/50 text-muted hover:text-gold transition-colors cursor-pointer flex items-center justify-center text-base leading-none"
-                >
-                  +
-                </button>
-              </div>
-            </div>
 
             {/* Description */}
             <div className="flex flex-col gap-2">

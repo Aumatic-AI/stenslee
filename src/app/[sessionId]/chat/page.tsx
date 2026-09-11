@@ -151,7 +151,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
       let res: Response;
       if (sessionFlowType === "rework") {
         const body: Record<string, unknown> = {
-          sessionId, mode: sessionReworkMode, style: sessionStyle, colors: selectedColors, count: thisCount,
+          sessionId, mode: sessionReworkMode, count: thisCount,
         };
         if (isFirst) {
           body.description = sessionDescription;
@@ -320,10 +320,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
   }
 
   const contextChips = sessionFlowType === "rework"
-    ? [
-        { label: sessionReworkMode === "cover" ? "Cover-Up" : "Extend & Blend" },
-        ...(sessionStyle ? [{ label: sessionStyle }] : []),
-      ]
+    ? [{ label: sessionReworkMode === "cover" ? "Cover-Up" : "Extend & Blend" }]
     : [
         ...(sessionStyle ? [{ label: sessionStyle }] : []),
         ...(targetBodyArea ? [{ label: targetBodyArea }] : []),
@@ -341,7 +338,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
             {c.label}
           </span>
         ))}
-        {selectedColors.length > 0 && (
+        {sessionFlowType !== "rework" && selectedColors.length > 0 && (
           <span className="flex items-center gap-1 px-1.5 py-1 rounded-full bg-bg border border-cleo-border">
             {selectedColors.slice(0, 5).map((hex) => (
               <span key={hex} className="w-3 h-3 rounded-full ring-1 ring-inset ring-white/20" style={{ backgroundColor: hex }} />
