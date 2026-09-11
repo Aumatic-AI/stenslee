@@ -46,8 +46,9 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
     customerName,
     persistDesigns,
     hydrateFromSession,
-    setFlowType, setReworkMode, setReworkPhoto,
+    flowType, setFlowType, reworkMode, setReworkMode, reworkPhoto, setReworkPhoto,
     setPendingGeneration, setIsTextTattoo: setStoreIsTextTattoo,
+    sessionId: storeSessionId,
   } = useAppStore();
 
   const [hydrating, setHydrating] = useState(false);
@@ -84,8 +85,14 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
   const expectedSeconds = 120;
   const progressPct = Math.min(95, (elapsed / expectedSeconds) * 100);
 
+  // Coming back to the same session already live in the store (e.g. from
+  // Chat) — restore the tab/photo/mode instead of resetting to a blank form.
+  const sameSession = storeSessionId === sessionId;
+
   // ── Design mode: AI generation vs direct customer upload vs rework ──
-  const [designMode, setDesignMode] = useState<"ai" | "direct" | "rework">("ai");
+  const [designMode, setDesignMode] = useState<"ai" | "direct" | "rework">(
+    sameSession && flowType === "rework" ? "rework" : "ai"
+  );
   const [directImageUrl, setDirectImageUrl] = useState<string | null>(null);
   const [directImagePreview, setDirectImagePreview] = useState<string | null>(null);
   const [uploadingDirect, setUploadingDirect] = useState(false);
@@ -93,8 +100,12 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
   const [proceedingDirect, setProceedingDirect] = useState(false);
 
   // Rework (cover-up / extend)
-  const [reworkPhotoPreview, setReworkPhotoPreview] = useState<string | null>(null);
-  const [reworkModeLocal, setReworkModeLocal] = useState<"cover" | "extend">("cover");
+  const [reworkPhotoPreview, setReworkPhotoPreview] = useState<string | null>(
+    sameSession ? reworkPhoto : null
+  );
+  const [reworkModeLocal, setReworkModeLocal] = useState<"cover" | "extend">(
+    sameSession ? reworkMode : "cover"
+  );
 
   const [faithfulMode, setFaithfulMode] = useState(false);
   const [isTextTattoo, setIsTextTattoo] = useState(false);
@@ -122,10 +133,17 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      await hydrateFromSession(sessionId);
+      // Already working on this exact session in this tab (e.g. just came
+      // back from Chat) — the store already has the live, current state,
+      // which can be ahead of the DB (a description typed but not yet
+      // generated/saved). Re-hydrating from the DB here would stomp that.
+      if (storeSessionId !== sessionId) {
+        await hydrateFromSession(sessionId);
+      }
       if (!cancelled) setHydrating(true);
     })();
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, hydrateFromSession]);
 
   useEffect(() => {
