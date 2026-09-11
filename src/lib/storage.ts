@@ -15,6 +15,26 @@ function extFromContentType(contentType: string | null): string {
   return "jpg";
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// This machine's Node process intermittently fails TLS handshakes to Supabase
+// (ECONNRESET / "fetch failed") while the same call almost always succeeds on
+// retry — the browser's network stack never has this problem, only Node's.
+// A short retry absorbs that instead of failing the whole upload on one blip.
+async function uploadWithRetry(path: string, buffer: Buffer, contentType: string, attempts = 3): Promise<void> {
+  const supabase = createServiceClient();
+  let lastError: Error | null = null;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const { error } = await supabase.storage.from(BUCKET).upload(path, buffer, { contentType, upsert: false });
+    if (!error) return;
+    lastError = new Error(error.message);
+    if (attempt < attempts) await sleep(400 * attempt);
+  }
+  throw new Error(`Storage upload failed: ${lastError?.message}`);
+}
+
 /** Upload a base64-encoded image (with or without data-URI prefix) to Supabase Storage. */
 export async function uploadBase64(
   base64Data: string,
@@ -28,14 +48,9 @@ export async function uploadBase64(
   const ext = extFromContentType(contentType);
   const path = makePath(sessionId, prefix, ext);
 
-  const supabase = createServiceClient();
-  const { error } = await supabase.storage.from(BUCKET).upload(path, buffer, {
-    contentType,
-    upsert: false,
-  });
-  if (error) throw new Error(`Storage upload failed: ${error.message}`);
+  await uploadWithRetry(path, buffer, contentType);
 
-  return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+  return createServiceClient().storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
 }
 
 /** Fetch a remote URL (e.g. KEI tempfile) and re-upload it to Supabase Storage. */
@@ -51,12 +66,7 @@ export async function uploadFromUrl(
   const ext = extFromContentType(contentType);
   const path = makePath(sessionId, prefix, ext);
 
-  const supabase = createServiceClient();
-  const { error } = await supabase.storage.from(BUCKET).upload(path, buffer, {
-    contentType,
-    upsert: false,
-  });
-  if (error) throw new Error(`Storage upload failed: ${error.message}`);
+  await uploadWithRetry(path, buffer, contentType);
 
-  return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+  return createServiceClient().storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
 }

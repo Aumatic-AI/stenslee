@@ -17,6 +17,7 @@ interface DesignRow {
   iteration: number;
   is_finalized: boolean;
   user_instruction: string | null;
+  parent_design_ids: string[];
   created_at: string;
 }
 
@@ -24,6 +25,9 @@ interface Batch {
   iteration: number;
   userInstruction: string | null;
   images: DesignRow[];
+  /** Thumbnails to show alongside the instruction — the source photo for a
+   *  first rework batch, or the selected image(s) an edit was based on. */
+  referenceUrls: string[];
 }
 
 const COUNT_OPTIONS = [1, 2, 3, 4, 5] as const;
@@ -94,19 +98,33 @@ function ChatInner({ sessionId }: { sessionId: string }) {
 
       const { data: designs } = await supabase
         .from("tattoo_designs")
-        .select("id, image_url, style_name, iteration, is_finalized, user_instruction, created_at")
+        .select("id, image_url, style_name, iteration, is_finalized, user_instruction, parent_design_ids, created_at")
         .eq("session_id", sessionId)
         .order("created_at", { ascending: true }) as { data: DesignRow[] | null };
 
       if (cancelled) return;
 
+      const byId = new Map((designs ?? []).map((d) => [d.id, d]));
       const grouped = new Map<number, Batch>();
       (designs ?? []).forEach((d) => {
-        const b = grouped.get(d.iteration) ?? { iteration: d.iteration, userInstruction: d.user_instruction, images: [] };
+        const b = grouped.get(d.iteration) ?? {
+          iteration: d.iteration,
+          userInstruction: d.user_instruction,
+          images: [],
+          referenceUrls: (d.parent_design_ids ?? [])
+            .map((pid) => byId.get(pid)?.image_url)
+            .filter((u): u is string => !!u),
+        };
         b.images.push(d);
         grouped.set(d.iteration, b);
       });
       const sortedBatches = [...grouped.values()].sort((a, b) => a.iteration - b.iteration);
+      // First batch of a rework thread has no parent — its "reference" is the
+      // original uploaded photo instead.
+      if (sortedBatches[0] && sortedBatches[0].referenceUrls.length === 0) {
+        const sourceUrl = session?.rework_source_photo_url;
+        if (sourceUrl) sortedBatches[0].referenceUrls = [sourceUrl];
+      }
       setBatches(sortedBatches);
 
       const finalized = (designs ?? []).find((d) => d.is_finalized);
@@ -145,7 +163,13 @@ function ChatInner({ sessionId }: { sessionId: string }) {
     const instructionForTurn = isFirst ? undefined : instruction.trim();
     const nextIteration = batches.length > 0 ? Math.max(...batches.map((b) => b.iteration)) + 1 : 1;
 
-    setBatches((prev) => [...prev, { iteration: nextIteration, userInstruction: instructionForTurn ?? null, images: [] }]);
+    const referenceUrls = isFirst
+      ? sessionFlowType === "rework"
+        ? (reworkPhoto ? [reworkPhoto] : [])
+        : referenceImages.slice(0, 5)
+      : editSourceUrls;
+
+    setBatches((prev) => [...prev, { iteration: nextIteration, userInstruction: instructionForTurn ?? null, images: [], referenceUrls }]);
 
     try {
       let res: Response;
@@ -218,6 +242,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
               iteration: nextIteration,
               is_finalized: false,
               user_instruction: instructionForTurn ?? null,
+              parent_design_ids: isFirst ? [] : editSourceIds,
               created_at: new Date().toISOString(),
             };
             setBatches((prev) => prev.map((b) => (b.iteration === nextIteration ? { ...b, images: [...b.images, row] } : b)));
@@ -359,7 +384,17 @@ function ChatInner({ sessionId }: { sessionId: string }) {
           <div key={batch.iteration} className="flex flex-col gap-3">
             {/* "User" message */}
             <div className="flex justify-end">
-              <div className="max-w-[85%] sm:max-w-md bg-gold/10 border border-gold/30 rounded-2xl rounded-tr-sm px-4 py-2.5">
+              <div className="max-w-[85%] sm:max-w-md bg-gold/10 border border-gold/30 rounded-2xl rounded-tr-sm px-4 py-2.5 flex flex-col gap-2">
+                {batch.referenceUrls.length > 0 && (
+                  <div className="flex gap-1.5 flex-wrap justify-end">
+                    {batch.referenceUrls.map((url, i) => (
+                      <div key={i} className="w-14 h-14 rounded-lg overflow-hidden border border-gold/30 flex-shrink-0">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={resolveImageSrc(url)} alt="Reference" className="w-full h-full object-cover" />
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <p className="text-ink text-sm leading-relaxed">
                   {batch.userInstruction ?? sessionDescription}
                 </p>
