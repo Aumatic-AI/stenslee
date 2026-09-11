@@ -85,6 +85,7 @@ export async function POST(req: NextRequest) {
     description,
     mode,
     editInstruction: isEdit ? editInstruction : undefined,
+    imageCount: inputUrls.length,
   });
 
   const clampedCount = Math.min(5, Math.max(1, Number(count) || 5));
