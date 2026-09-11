@@ -6,10 +6,11 @@ import Image from "next/image";
 import Link from "next/link";
 import { useAppStore } from "@/store/app-store";
 
-const STEPS = [
+const AI_DESIGN_STEPS = [
   { label: "Design", path: "design" },
   { label: "Placement", path: "placement" },
 ];
+const REWORK_STEPS = [{ label: "Rework", path: "design" }];
 
 export default function SessionLayout({
   children,
@@ -22,8 +23,12 @@ export default function SessionLayout({
   const pathname = usePathname();
   const router = useRouter();
   const customerName = useAppStore((s) => s.customerName);
+  const flowType = useAppStore((s) => s.flowType);
 
-  const currentStep = STEPS.findIndex((s) => pathname.includes(s.path));
+  const STEPS = flowType === "rework" ? REWORK_STEPS : AI_DESIGN_STEPS;
+  // /chat is a sub-screen of Design/Rework, not its own step
+  const matchPath = pathname.includes("chat") ? "design" : pathname;
+  const currentStep = STEPS.findIndex((s) => matchPath.includes(s.path));
   const isPlacement = pathname.includes("placement");
 
   function handleBack() {

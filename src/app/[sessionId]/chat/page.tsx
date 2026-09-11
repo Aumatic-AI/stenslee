@@ -1,0 +1,493 @@
+"use client";
+
+import { Suspense, use, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { motion } from "framer-motion";
+import { useAppStore } from "@/store/app-store";
+import { createSupabaseBrowserClient } from "@/lib/supabase-client";
+import { blobUrlToBase64 } from "@/lib/image-utils";
+import { resolveImageSrc } from "@/lib/image-src";
+
+const supabase = createSupabaseBrowserClient();
+
+interface DesignRow {
+  id: string;
+  image_url: string;
+  style_name: string | null;
+  iteration: number;
+  is_finalized: boolean;
+  user_instruction: string | null;
+  created_at: string;
+}
+
+interface Batch {
+  iteration: number;
+  userInstruction: string | null;
+  images: DesignRow[];
+}
+
+const COUNT_OPTIONS = [1, 2, 3, 4, 5] as const;
+
+function ChatInner({ sessionId }: { sessionId: string }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const editTargetId = searchParams.get("edit");
+
+  const {
+    flowType, reworkMode, reworkPhoto,
+    tattooStyle, tattooDescription, targetBodyArea, selectedColors, referenceImages,
+    isTextTattoo, textTattooFont,
+    pendingGeneration, setPendingGeneration,
+    persistDesigns, selectDesign, finalizeReworkSession,
+  } = useAppStore();
+
+  const [loading, setLoading] = useState(true);
+  const [batches, setBatches] = useState<Batch[]>([]);
+  const [finalizedId, setFinalizedId] = useState<string | null>(null);
+  const [reworkDone, setReworkDone] = useState(false);
+  const [customerId, setCustomerId] = useState<string | null>(null);
+  // Authoritative session context — read from the DB, not just the in-memory
+  // store, so reopening a session later (e.g. "Continue Design" from history)
+  // still shows correct chips even if the store has a different session loaded.
+  const [sessionFlowType, setSessionFlowType] = useState<"ai_design" | "rework">(flowType);
+  const [sessionReworkMode, setSessionReworkMode] = useState<"cover" | "extend">(reworkMode);
+  const [sessionStyle, setSessionStyle] = useState(tattooStyle);
+  const [sessionDescription, setSessionDescription] = useState(tattooDescription);
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [instruction, setInstruction] = useState("");
+  const [count, setCount] = useState(5);
+  const [sending, setSending] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [finalizing, setFinalizing] = useState<string | null>(null);
+
+  const didKickoffRef = useRef(false);
+  const threadEndRef = useRef<HTMLDivElement>(null);
+
+  function findDesign(id: string): DesignRow | undefined {
+    for (const b of batches) {
+      const found = b.images.find((img) => img.id === id);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  // ── Load session + existing thread ─────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      const { data: session } = await supabase
+        .from("sessions")
+        .select("user_id, flow_type, rework_mode, tattoo_style, tattoo_description")
+        .eq("id", sessionId)
+        .maybeSingle();
+      if (!cancelled && session) {
+        setCustomerId(session.user_id ?? null);
+        setSessionFlowType((session.flow_type as "ai_design" | "rework" | null) ?? flowType);
+        setSessionReworkMode((session.rework_mode as "cover" | "extend" | null) ?? reworkMode);
+        setSessionStyle(session.tattoo_style ?? tattooStyle);
+        setSessionDescription(session.tattoo_description ?? tattooDescription);
+      }
+
+      const { data: designs } = await supabase
+        .from("tattoo_designs")
+        .select("id, image_url, style_name, iteration, is_finalized, user_instruction, created_at")
+        .eq("session_id", sessionId)
+        .order("created_at", { ascending: true }) as { data: DesignRow[] | null };
+
+      if (cancelled) return;
+
+      const grouped = new Map<number, Batch>();
+      (designs ?? []).forEach((d) => {
+        const b = grouped.get(d.iteration) ?? { iteration: d.iteration, userInstruction: d.user_instruction, images: [] };
+        b.images.push(d);
+        grouped.set(d.iteration, b);
+      });
+      const sortedBatches = [...grouped.values()].sort((a, b) => a.iteration - b.iteration);
+      setBatches(sortedBatches);
+
+      const finalized = (designs ?? []).find((d) => d.is_finalized);
+      if (finalized) setFinalizedId(finalized.id);
+
+      setLoading(false);
+
+      if (editTargetId) {
+        setSelectedIds(new Set([editTargetId]));
+      }
+
+      if (pendingGeneration && !didKickoffRef.current && sortedBatches.length === 0) {
+        didKickoffRef.current = true;
+        setPendingGeneration(false);
+        runGeneration(true, []);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
+
+  useEffect(() => {
+    threadEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [batches, pendingCount]);
+
+  // ── Generation / edit ───────────────────────────────────────
+  async function runGeneration(isFirst: boolean, editSourceIds: string[]) {
+    setSending(true);
+    setError(null);
+    const thisCount = isFirst ? 5 : count;
+    setPendingCount(thisCount);
+
+    const selectedRows = editSourceIds.map(findDesign).filter((r): r is DesignRow => !!r);
+    const editSourceUrls = selectedRows.map((r) => r.image_url);
+    const instructionForTurn = isFirst ? undefined : instruction.trim();
+    const nextIteration = batches.length > 0 ? Math.max(...batches.map((b) => b.iteration)) + 1 : 1;
+
+    setBatches((prev) => [...prev, { iteration: nextIteration, userInstruction: instructionForTurn ?? null, images: [] }]);
+
+    try {
+      let res: Response;
+      if (sessionFlowType === "rework") {
+        const body: Record<string, unknown> = {
+          sessionId, mode: sessionReworkMode, style: sessionStyle, colors: selectedColors, count: thisCount,
+        };
+        if (isFirst) {
+          body.description = sessionDescription;
+          if (reworkPhoto) body.sourcePhoto = await blobUrlToBase64(reworkPhoto);
+        } else {
+          body.editInstruction = instructionForTurn;
+          body.editSourceUrls = editSourceUrls;
+        }
+        res = await fetch("/api/generate-rework", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        });
+      } else {
+        const localRefs = referenceImages.filter((r) => r.startsWith("blob:") || r.startsWith("data:"));
+        const hostedRefs = referenceImages.filter((r) => !r.startsWith("blob:") && !r.startsWith("data:"));
+        const images = isFirst ? await Promise.all(localRefs.map(blobUrlToBase64)) : [];
+        const body: Record<string, unknown> = {
+          sessionId, description: sessionDescription, style: sessionStyle,
+          images, referenceImageUrls: isFirst ? hostedRefs : [],
+          isTextTattoo, colors: selectedColors, targetBodyArea, count: thisCount,
+          ...(isTextTattoo && textTattooFont ? { textTattooFont } : {}),
+        };
+        if (!isFirst) {
+          body.refineImageUrls = editSourceUrls;
+          body.refinementText = instructionForTurn;
+          body.selectedDesignNames = selectedRows.map((r) => r.style_name ?? "Design");
+        }
+        res = await fetch("/api/generate", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        });
+      }
+
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error ?? "Generation failed");
+      }
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let slotIndex = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let event: { type: string; image?: { id: string; imageUrl: string }; reason?: string; code?: string };
+          try { event = JSON.parse(line); } catch { continue; }
+
+          if (event.type === "result" && event.image) {
+            const i = slotIndex++;
+            const [persisted] = await persistDesigns(
+              [{ id: event.image.id, imageUrl: event.image.imageUrl, gradient: "", patternType: "mandala", styleName: `Variation ${i + 1}` }],
+              { parentDesignIds: isFirst ? [] : editSourceIds, userInstruction: instructionForTurn }
+            );
+            const row: DesignRow = {
+              id: persisted.dbId ?? persisted.id,
+              image_url: persisted.imageUrl!,
+              style_name: persisted.styleName,
+              iteration: nextIteration,
+              is_finalized: false,
+              user_instruction: instructionForTurn ?? null,
+              created_at: new Date().toISOString(),
+            };
+            setBatches((prev) => prev.map((b) => (b.iteration === nextIteration ? { ...b, images: [...b.images, row] } : b)));
+            setPendingCount((c) => Math.max(0, c - 1));
+          } else if (event.type === "error") {
+            setPendingCount((c) => Math.max(0, c - 1));
+            if (event.code === "insufficient_credits") {
+              setError("AI generation credits are exhausted. Please contact the admin to top up and restore the service.");
+            }
+          }
+        }
+      }
+      setSelectedIds(new Set());
+      setInstruction("");
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSending(false);
+      setPendingCount(0);
+    }
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function handleSend() {
+    if (sending) return;
+    if (selectedIds.size === 0) { setError("Select at least one image to edit — the instruction alone isn't enough, pick what it applies to."); return; }
+    if (!instruction.trim()) return;
+    runGeneration(false, [...selectedIds]);
+  }
+
+  async function handleUse(row: DesignRow) {
+    if (sessionFlowType === "rework") {
+      setFinalizing(row.id);
+      try {
+        await finalizeReworkSession(row.id);
+        setReworkDone(true);
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setFinalizing(null);
+      }
+    } else {
+      selectDesign({ id: row.id, dbId: row.id, gradient: "", patternType: "mandala", styleName: row.style_name ?? "Design", imageUrl: row.image_url });
+      router.push(`/${sessionId}/placement`);
+    }
+  }
+
+  async function handleDelete(row: DesignRow) {
+    setBatches((prev) => prev.map((b) => ({ ...b, images: b.images.filter((img) => img.id !== row.id) })));
+    setSelectedIds((prev) => { const next = new Set(prev); next.delete(row.id); return next; });
+    await supabase.from("tattoo_designs").delete().eq("id", row.id);
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-gold border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (reworkDone) {
+    return (
+      <div className="min-h-[70vh] flex items-center justify-center px-4">
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-surface border border-gold/30 rounded-2xl p-8 max-w-sm w-full flex flex-col items-center gap-4 text-center"
+        >
+          <div className="w-16 h-16 rounded-full bg-gold/10 border border-gold/30 flex items-center justify-center">
+            <svg className="w-8 h-8 text-gold" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+            </svg>
+          </div>
+          <h1 className="font-cinzel text-xl font-black text-ink">Rework Complete</h1>
+          <p className="text-muted text-sm">The finished design has been saved to this customer&apos;s history.</p>
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.97 }}
+            onClick={() => router.push(customerId ? `/customer/${customerId}` : "/")}
+            className="w-full bg-gold text-bg font-cinzel font-bold text-sm tracking-[0.08em] uppercase py-3.5 rounded-xl border border-gold hover:bg-gold-light transition-colors cursor-pointer"
+          >
+            ✦ Back to Dashboard
+          </motion.button>
+        </motion.div>
+      </div>
+    );
+  }
+
+  const contextChips = sessionFlowType === "rework"
+    ? [
+        { label: sessionReworkMode === "cover" ? "Cover-Up" : "Extend & Blend" },
+        ...(sessionStyle ? [{ label: sessionStyle }] : []),
+      ]
+    : [
+        ...(sessionStyle ? [{ label: sessionStyle }] : []),
+        ...(targetBodyArea ? [{ label: targetBodyArea }] : []),
+      ];
+
+  return (
+    <div className="flex flex-col h-[calc(100vh-57px)]">
+      {/* Context bar */}
+      <div className="border-b border-cleo-border bg-surface/60 px-4 sm:px-6 py-2.5 flex items-center gap-2 flex-wrap flex-shrink-0">
+        <span className="text-[10px] font-mono uppercase tracking-widest text-muted/60">
+          {sessionFlowType === "rework" ? "Rework" : "AI Design"}
+        </span>
+        {contextChips.map((c) => (
+          <span key={c.label} className="text-[10px] font-mono px-2 py-1 rounded-full bg-bg border border-cleo-border text-muted">
+            {c.label}
+          </span>
+        ))}
+        {selectedColors.length > 0 && (
+          <span className="flex items-center gap-1 px-1.5 py-1 rounded-full bg-bg border border-cleo-border">
+            {selectedColors.slice(0, 5).map((hex) => (
+              <span key={hex} className="w-3 h-3 rounded-full ring-1 ring-inset ring-white/20" style={{ backgroundColor: hex }} />
+            ))}
+          </span>
+        )}
+        {sessionFlowType === "rework" && reworkPhoto && (
+          <div className="w-7 h-7 rounded-md overflow-hidden border border-cleo-border ml-1">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={reworkPhoto} alt="Source" className="w-full h-full object-cover" />
+          </div>
+        )}
+      </div>
+
+      {/* Thread */}
+      <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 flex flex-col gap-6">
+        {batches.map((batch) => (
+          <div key={batch.iteration} className="flex flex-col gap-3">
+            {/* "User" message */}
+            <div className="flex justify-end">
+              <div className="max-w-[85%] sm:max-w-md bg-gold/10 border border-gold/30 rounded-2xl rounded-tr-sm px-4 py-2.5">
+                <p className="text-ink text-sm leading-relaxed">
+                  {batch.userInstruction ?? sessionDescription}
+                </p>
+              </div>
+            </div>
+
+            {/* AI response — grid of images for this batch */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5 sm:gap-3 max-w-3xl">
+              {batch.images.map((row) => {
+                const isSelected = selectedIds.has(row.id);
+                const isFinalized = row.id === finalizedId;
+                return (
+                  <div key={row.id} className="relative group rounded-xl overflow-hidden border border-cleo-border bg-surface-2" style={{ aspectRatio: "1" }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={resolveImageSrc(row.image_url)} alt={row.style_name ?? "Design"} className="w-full h-full object-cover" />
+
+                    <button
+                      onClick={() => toggleSelect(row.id)}
+                      className={`absolute top-1.5 left-1.5 w-5 h-5 rounded-md border flex items-center justify-center transition-colors cursor-pointer ${
+                        isSelected ? "bg-gold border-gold" : "bg-black/50 border-white/40 hover:border-gold"
+                      }`}
+                      title="Select for editing"
+                    >
+                      {isSelected && (
+                        <svg className="w-3 h-3 text-bg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      )}
+                    </button>
+
+                    <button
+                      onClick={() => handleDelete(row)}
+                      className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-black/50 border border-white/40 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer hover:border-error hover:text-error"
+                      title="Delete this version"
+                    >
+                      ×
+                    </button>
+
+                    {isFinalized && (
+                      <div className="absolute top-1.5 left-1.5 right-1.5 flex justify-center">
+                        <span className="text-[9px] font-mono uppercase tracking-wider bg-gold text-bg px-2 py-0.5 rounded-full">Finalized</span>
+                      </div>
+                    )}
+
+                    <button
+                      onClick={() => handleUse(row)}
+                      disabled={finalizing === row.id}
+                      className="absolute bottom-0 left-0 right-0 bg-black/70 backdrop-blur-sm text-white text-[10px] font-mono uppercase tracking-wider py-1.5 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer hover:bg-gold hover:text-bg disabled:opacity-50"
+                    >
+                      {finalizing === row.id ? "Saving…" : "✦ Use this"}
+                    </button>
+                  </div>
+                );
+              })}
+
+              {/* Loading placeholders for the in-flight batch */}
+              {sending && batch.iteration === batches[batches.length - 1]?.iteration &&
+                Array.from({ length: pendingCount }).map((_, i) => (
+                  <div key={`loading-${i}`} className="rounded-xl overflow-hidden border border-cleo-border" style={{ aspectRatio: "1" }}>
+                    <div className="w-full h-full skeleton flex items-center justify-center">
+                      <div className="w-5 h-5 border-2 border-gold/50 border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  </div>
+                ))
+              }
+            </div>
+          </div>
+        ))}
+
+        {error && (
+          <div className="bg-error/10 border border-error/30 rounded-xl px-4 py-3 max-w-3xl">
+            <p className="text-error text-xs font-mono leading-relaxed">{error}</p>
+          </div>
+        )}
+
+        <div ref={threadEndRef} />
+      </div>
+
+      {/* Composer */}
+      <div className="border-t border-cleo-border bg-surface px-4 sm:px-6 py-3 flex-shrink-0 flex flex-col gap-2">
+        {selectedIds.size > 0 && (
+          <p className="text-[10px] font-mono text-gold uppercase tracking-wider">
+            {selectedIds.size} image{selectedIds.size === 1 ? "" : "s"} selected as reference
+          </p>
+        )}
+        <div className="flex items-end gap-2">
+          <textarea
+            rows={1}
+            value={instruction}
+            onChange={(e) => setInstruction(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+            placeholder={selectedIds.size === 0 ? "Select an image above, then describe your change…" : "e.g. Make the mane fuller, remove the small stars…"}
+            className="flex-1 bg-bg border border-cleo-border rounded-xl px-3.5 py-2.5 text-ink text-sm placeholder:text-muted/50 focus:border-gold focus:outline-none transition-colors resize-none max-h-28"
+          />
+          <div className="flex items-center gap-1 bg-bg border border-cleo-border rounded-lg p-1 flex-shrink-0">
+            {COUNT_OPTIONS.map((n) => (
+              <button
+                key={n}
+                onClick={() => setCount(n)}
+                className={`w-7 h-7 rounded-md text-xs font-mono font-bold transition-colors cursor-pointer ${
+                  count === n ? "bg-gold text-bg" : "text-muted hover:text-ink"
+                }`}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={handleSend}
+            disabled={sending || !instruction.trim() || selectedIds.size === 0}
+            className="flex-shrink-0 w-11 h-11 rounded-xl bg-gold text-bg flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer hover:bg-gold-light transition-colors"
+          >
+            {sending ? (
+              <div className="w-4 h-4 border-2 border-bg/40 border-t-bg rounded-full animate-spin" />
+            ) : (
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+              </svg>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function ChatPage({ params }: { params: Promise<{ sessionId: string }> }) {
+  const { sessionId } = use(params);
+  return (
+    <Suspense fallback={<div className="min-h-[60vh] flex items-center justify-center"><div className="w-8 h-8 border-2 border-gold border-t-transparent rounded-full animate-spin" /></div>}>
+      <ChatInner sessionId={sessionId} />
+    </Suspense>
+  );
+}

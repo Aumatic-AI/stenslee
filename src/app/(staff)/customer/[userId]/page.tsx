@@ -8,6 +8,7 @@ import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 import { useAppStore } from "@/store/app-store";
 import { resolveBackUrl } from "@/lib/auth-utils";
+import FilterChips from "@/components/ui/FilterChips";
 
 const supabase = createSupabaseBrowserClient();
 
@@ -50,10 +51,13 @@ interface CompletedSession {
   id: string;
   tattoo_style: string | null;
   tattoo_description: string | null;
+  flow_type: "ai_design" | "rework";
   completed_at: string;
   design: { image_url: string; style_name: string | null } | null;
   placement: { placement_text: string | null; final_composite_url: string | null } | null;
 }
+
+type HistoryFilter = "all" | "ai_design" | "rework";
 
 interface ActiveSession {
   id: string;
@@ -76,6 +80,7 @@ function CustomerDashboardInner() {
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [sessions, setSessions] = useState<CompletedSession[]>([]);
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("all");
   const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -110,7 +115,7 @@ function CustomerDashboardInner() {
         supabase
           .from("sessions")
           .select(`
-            id, tattoo_style, tattoo_description, completed_at,
+            id, tattoo_style, tattoo_description, flow_type, completed_at,
             tattoo_designs!inner(image_url, style_name),
             placements(placement_text, final_composite_url)
           `)
@@ -136,6 +141,7 @@ function CustomerDashboardInner() {
           id: s.id,
           tattoo_style: s.tattoo_style,
           tattoo_description: s.tattoo_description,
+          flow_type: s.flow_type ?? "ai_design",
           completed_at: s.completed_at,
           design: Array.isArray(s.tattoo_designs) ? s.tattoo_designs[0] ?? null : s.tattoo_designs,
           placement: Array.isArray(s.placements)
@@ -390,12 +396,36 @@ function CustomerDashboardInner() {
 
         {/* Tattoo history */}
         <div className="flex flex-col gap-4">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <h2 className="font-cinzel text-sm font-bold tracking-[0.18em] text-muted uppercase">Tattoo History</h2>
-            <div className="flex-1 h-px bg-cleo-border" />
+            <div className="flex-1 h-px bg-cleo-border min-w-8" />
+            {sessions.length > 0 && (
+              <FilterChips
+                options={[
+                  { value: "all", label: "All" },
+                  { value: "ai_design", label: "AI Design" },
+                  { value: "rework", label: "Rework" },
+                ]}
+                value={historyFilter}
+                onChange={setHistoryFilter}
+              />
+            )}
           </div>
 
-          {sessions.length === 0 ? (
+          {(() => {
+            const filteredSessions = historyFilter === "all"
+              ? sessions
+              : sessions.filter((s) => s.flow_type === historyFilter);
+
+            if (sessions.length > 0 && filteredSessions.length === 0) {
+              return (
+                <div className="bg-surface border border-cleo-border rounded-2xl p-8 text-center">
+                  <p className="text-muted text-sm">No {historyFilter === "ai_design" ? "AI Design" : "Rework"} sessions yet.</p>
+                </div>
+              );
+            }
+
+            return filteredSessions.length === 0 ? (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -417,7 +447,8 @@ function CustomerDashboardInner() {
             </motion.div>
           ) : (
             <div className="flex flex-col gap-4">
-              {sessions.map((session, i) => {
+              {filteredSessions.map((session, i) => {
+                const isRework = session.flow_type === "rework";
                 const designUrl = session.design?.image_url;
                 const bodyUrl = session.placement?.final_composite_url;
                 const dateLabel = new Date(session.completed_at).toLocaleDateString("en-US", {
@@ -435,12 +466,12 @@ function CustomerDashboardInner() {
                     className="bg-surface border border-cleo-border rounded-2xl overflow-hidden text-left hover:border-gold/40 transition-colors cursor-pointer group"
                   >
                     <div className="p-3 sm:p-4 flex flex-col sm:flex-row gap-3 sm:gap-4">
-                      {/* Thumbnail pair */}
+                      {/* Thumbnail(s) — rework has one finished photo, AI Design has design + on-body */}
                       <div className="flex gap-2 flex-shrink-0">
-                        {[
-                          { url: designUrl, label: "Design" },
-                          { url: bodyUrl, label: "On Body" },
-                        ].map(({ url, label }) => (
+                        {(isRework
+                          ? [{ url: designUrl, label: "Result" }]
+                          : [{ url: designUrl, label: "Design" }, { url: bodyUrl, label: "On Body" }]
+                        ).map(({ url, label }) => (
                           <div key={label} className="flex flex-col gap-1.5 items-center">
                             <div className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-xl overflow-hidden bg-surface-2 border border-cleo-border group-hover:border-gold/30 transition-colors">
                               {url ? (
@@ -460,8 +491,15 @@ function CustomerDashboardInner() {
                       <div className="flex-1 flex flex-col justify-between min-w-0 gap-2">
                         <div className="flex flex-col gap-1.5">
                           <div className="flex items-center justify-between gap-2">
-                            <span className="font-cinzel text-xs font-bold tracking-[0.15em] text-gold uppercase truncate">
-                              {session.tattoo_style ?? session.design?.style_name ?? "Custom Design"}
+                            <span className="flex items-center gap-1.5 min-w-0">
+                              <span className="font-cinzel text-xs font-bold tracking-[0.15em] text-gold uppercase truncate">
+                                {session.tattoo_style ?? session.design?.style_name ?? "Custom Design"}
+                              </span>
+                              {isRework && (
+                                <span className="text-[9px] font-mono uppercase tracking-wider bg-gold/10 text-gold border border-gold/30 px-1.5 py-0.5 rounded-full flex-shrink-0">
+                                  Rework
+                                </span>
+                              )}
                             </span>
                             <span className="text-muted/50 text-[10px] font-mono flex-shrink-0">#{session.id}</span>
                           </div>
@@ -490,7 +528,8 @@ function CustomerDashboardInner() {
                 );
               })}
             </div>
-          )}
+          );
+          })()}
         </div>
       </div>
 

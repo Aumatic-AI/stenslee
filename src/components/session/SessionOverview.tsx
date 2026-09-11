@@ -31,6 +31,7 @@ interface SessionDetail {
   id: string;
   tattoo_style: string | null;
   tattoo_description: string | null;
+  flow_type: "ai_design" | "rework";
   status: string;
   created_at: string;
   completed_at: string | null;
@@ -114,7 +115,7 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
       const { data } = await supabase
         .from("sessions")
         .select(`
-          id, tattoo_style, tattoo_description, status, created_at, completed_at,
+          id, tattoo_style, tattoo_description, flow_type, status, created_at, completed_at,
           users(first_name, phone),
           designer:designer_id(name, email),
           tattoo_designs(id, image_url, style_name, pattern_type, iteration, is_finalized),
@@ -167,9 +168,10 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
   const designs = Array.isArray(session.tattoo_designs) ? session.tattoo_designs : [];
   const placements = Array.isArray(session.placements) ? session.placements : [];
 
-  // If any design was already generated, resume at Placement (the design
-  // page auto-selects one of them on hydration); otherwise resume at Design.
-  const continueUrl = designs.length > 0 ? `/${session.id}/placement` : `/${session.id}/design`;
+  // If any design was already generated, resume in Chat to keep iterating/
+  // selecting (generation results live there now, not on the Design page);
+  // otherwise resume at Design/Rework to start from scratch.
+  const continueUrl = designs.length > 0 ? `/${session.id}/chat` : `/${session.id}/design`;
 
   const finalDesign = designs.find((d) => d.is_finalized);
   const finalPlacement =
