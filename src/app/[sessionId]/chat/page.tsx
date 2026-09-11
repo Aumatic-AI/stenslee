@@ -54,7 +54,7 @@ interface JobSlot {
 }
 
 const COUNT_OPTIONS = [1, 2, 3, 4, 5] as const;
-const POLL_INTERVAL_MS = 3000;
+const POLL_INTERVAL_MS = 5000;
 
 function ChatInner({ sessionId }: { sessionId: string }) {
   const router = useRouter();
