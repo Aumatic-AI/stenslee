@@ -54,7 +54,7 @@ interface JobSlot {
 }
 
 const COUNT_OPTIONS = [1, 2, 3, 4, 5] as const;
-const POLL_INTERVAL_MS = 1500;
+const POLL_INTERVAL_MS = 3000;
 
 function ChatInner({ sessionId }: { sessionId: string }) {
   const router = useRouter();
@@ -129,13 +129,13 @@ function ChatInner({ sessionId }: { sessionId: string }) {
       }
 
       const [chatRes, designsRes] = await Promise.all([
-        fetch(`/api/chat?sessionId=${sessionId}`).then((r) => r.json()),
+        supabase.from("chat_messages").select("id, role, content, image_urls, design_ids, created_at").eq("session_id", sessionId).order("created_at", { ascending: true }),
         supabase.from("tattoo_designs").select("id, is_finalized").eq("session_id", sessionId),
       ]);
 
       if (cancelled) return;
 
-      const loadedMessages: ChatMessage[] = chatRes.messages ?? [];
+      const loadedMessages: ChatMessage[] = chatRes.data ?? [];
       setMessages(loadedMessages);
       setFinalizedIds(new Set((designsRes.data ?? []).filter((d) => d.is_finalized).map((d) => d.id)));
       setLoading(false);
