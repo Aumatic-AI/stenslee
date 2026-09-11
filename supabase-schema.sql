@@ -289,6 +289,14 @@ create policy "placements: designer own"      on placements for all using (
 create policy "prefs: admin full access" on user_preferences for all using (is_admin());
 create policy "prefs: designer read"     on user_preferences for select using (is_designer());
 
+-- STORAGE (session-assets bucket) — lets staff upload directly from the
+-- browser instead of routing the file through a Node-side server upload.
+-- This machine's Node process is unreliable talking to Supabase over the
+-- network; the browser's own network stack is not, so uploads that can
+-- happen client-side should.
+create policy "session-assets: staff upload" on storage.objects for insert
+  with check (bucket_id = 'session-assets' and (is_admin() or is_designer()));
+
 -- ── SEED: First Admin Account ────────────────────────────────
 -- Option A (recommended): Create the admin via Supabase Dashboard:
 --   Authentication → Users → Add user → Create new user

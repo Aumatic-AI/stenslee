@@ -10,6 +10,25 @@ import { resolveImageSrc } from "@/lib/image-src";
 
 const supabase = createSupabaseBrowserClient();
 
+function extFromMime(mime: string): string {
+  if (mime.includes("png")) return "png";
+  if (mime.includes("webp")) return "webp";
+  return "jpg";
+}
+
+// Uploads a local blob: URL straight from the browser to Supabase Storage and
+// returns its public URL. Used instead of sending the photo to a Node API
+// route to re-upload — this machine's Node process is unreliable talking to
+// Supabase over the network, while the browser's own network stack isn't.
+async function uploadPhotoDirect(blobUrl: string, sessionId: string): Promise<string> {
+  const blob = await (await fetch(blobUrl)).blob();
+  const contentType = blob.type || "image/jpeg";
+  const path = `${sessionId}/rework-source/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extFromMime(contentType)}`;
+  const { error } = await supabase.storage.from("session-assets").upload(path, blob, { contentType, upsert: false });
+  if (error) throw new Error(`Photo upload failed: ${error.message}`);
+  return supabase.storage.from("session-assets").getPublicUrl(path).data.publicUrl;
+}
+
 interface DesignRow {
   id: string;
   image_url: string;
@@ -179,7 +198,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
         };
         if (isFirst) {
           body.description = sessionDescription;
-          if (reworkPhoto) body.sourcePhoto = await blobUrlToBase64(reworkPhoto);
+          if (reworkPhoto) body.sourcePhotoUrl = await uploadPhotoDirect(reworkPhoto, sessionId);
         } else {
           body.editInstruction = instructionForTurn;
           body.editSourceUrls = editSourceUrls;
