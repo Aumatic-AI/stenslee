@@ -46,6 +46,8 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
     customerName,
     persistDesigns,
     hydrateFromSession,
+    setFlowType, setReworkMode, setReworkPhoto,
+    setPendingGeneration, setIsTextTattoo: setStoreIsTextTattoo,
   } = useAppStore();
 
   const [hydrating, setHydrating] = useState(false);
@@ -82,13 +84,17 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
   const expectedSeconds = 120;
   const progressPct = Math.min(95, (elapsed / expectedSeconds) * 100);
 
-  // ── Design mode: AI generation vs direct customer upload ──
-  const [designMode, setDesignMode] = useState<"ai" | "direct">("ai");
+  // ── Design mode: AI generation vs direct customer upload vs rework ──
+  const [designMode, setDesignMode] = useState<"ai" | "direct" | "rework">("ai");
   const [directImageUrl, setDirectImageUrl] = useState<string | null>(null);
   const [directImagePreview, setDirectImagePreview] = useState<string | null>(null);
   const [uploadingDirect, setUploadingDirect] = useState(false);
   const [directError, setDirectError] = useState<string | null>(null);
   const [proceedingDirect, setProceedingDirect] = useState(false);
+
+  // Rework (cover-up / extend)
+  const [reworkPhotoPreview, setReworkPhotoPreview] = useState<string | null>(null);
+  const [reworkModeLocal, setReworkModeLocal] = useState<"cover" | "extend">("cover");
 
   const [faithfulMode, setFaithfulMode] = useState(false);
   const [isTextTattoo, setIsTextTattoo] = useState(false);
@@ -305,6 +311,27 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
   }
 
   const {
+    getRootProps: getReworkRootProps,
+    getInputProps: getReworkInputProps,
+    isDragActive: isReworkDragActive,
+  } = useDropzone({
+    accept: { "image/*": [".jpg", ".jpeg", ".png", ".webp", ".heic"] },
+    maxFiles: 1,
+    onDrop: (files) => {
+      if (files[0]) setReworkPhotoPreview(URL.createObjectURL(files[0]));
+    },
+  });
+
+  function handleGenerateRework() {
+    if (!reworkPhotoPreview || !tattooDescription.trim()) return;
+    setFlowType("rework");
+    setReworkMode(reworkModeLocal);
+    setReworkPhoto(reworkPhotoPreview);
+    setPendingGeneration(true);
+    router.push(`/${sessionId}/chat`);
+  }
+
+  const {
     getRootProps: getDirectRootProps,
     getInputProps: getDirectInputProps,
     isDragActive: isDirectDragActive,
@@ -491,26 +518,12 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
     return { images, urls };
   }
 
-  async function handleGenerate() {
+  function handleGenerate() {
     if (!canGenerate) return;
-    setRefineSourceDesigns([]);
-    const { images, urls } = await splitReferences();
-    const { textTattooFont } = useAppStore.getState();
-    
-    callGenerateAPI({
-      sessionId,
-      description: tattooDescription,
-      style: tattooStyle,
-      images,
-      referenceImageUrls: urls,
-      isTextTattoo,
-      colors: selectedColors,
-      targetBodyArea,
-      count: 5,
-      ...(isTextTattoo && textTattooFont
-        ? { textTattooFont } 
-        : {}),
-    });
+    setFlowType("ai_design");
+    setStoreIsTextTattoo(isTextTattoo);
+    setPendingGeneration(true);
+    router.push(`/${sessionId}/chat`);
   }
 
   async function handleRefine() {
@@ -834,7 +847,9 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
           <p className="text-muted text-xs sm:text-sm mt-1.5 sm:mt-2 leading-relaxed">
             {designMode === "ai"
               ? "Choose a style, describe your idea, and optionally add a reference image."
-              : "Customer has a ready design — upload it and proceed directly to placement."}
+              : designMode === "direct"
+              ? "Customer has a ready design — upload it and proceed directly to placement."
+              : "Customer has an existing tattoo — upload a photo and describe the cover-up or extension."}
           </p>
         </motion.div>
 
@@ -842,9 +857,9 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.04 }}
           className="flex gap-2 p-1 bg-surface rounded-xl border border-cleo-border w-full flex-wrap sm:flex-nowrap sm:w-fit">
           {[
-            { 
-              mode: "ai" as const, 
-              label: "AI Design", 
+            {
+              mode: "ai" as const,
+              label: "AI Design",
               icon: (
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
@@ -852,12 +867,22 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
               )
             },
 
-            { 
-              mode: "direct" as const, 
-              label: "Upload Existing", 
+            {
+              mode: "direct" as const,
+              label: "Upload Existing",
               icon: (
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+              )
+            },
+
+            {
+              mode: "rework" as const,
+              label: "Rework",
+              icon: (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L15.6 5.6" />
                 </svg>
               )
             },
@@ -959,6 +984,160 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
                 </motion.button>
               </div>
             )}
+          </motion.div>
+        )}
+
+        {/* ── Rework (cover-up / extend) card ───────────────────── */}
+        {designMode === "rework" && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4 }}
+            className="bg-surface rounded-2xl border border-cleo-border p-4 sm:p-6 flex flex-col gap-5"
+          >
+            {/* Photo of the existing tattoo */}
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-mono tracking-[0.15em] uppercase text-muted">
+                Photo of Existing Tattoo <span className="text-error/70 normal-case font-mono">*required</span>
+              </label>
+              {!reworkPhotoPreview ? (
+                <div
+                  {...getReworkRootProps()}
+                  className={`flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed py-10 px-6 text-center cursor-pointer transition-colors ${
+                    isReworkDragActive ? "border-gold bg-gold/5" : "border-cleo-border hover:border-gold/50 hover:bg-surface-2"
+                  }`}
+                >
+                  <input {...getReworkInputProps()} />
+                  <div className="w-12 h-12 rounded-full bg-gold/10 border border-gold/30 flex items-center justify-center">
+                    <svg className="w-5 h-5 text-gold" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="text-ink font-cinzel font-bold text-sm">
+                      {isReworkDragActive ? "Drop the photo here" : "Drop a photo or click to browse"}
+                    </p>
+                    <p className="text-muted text-xs mt-1">A clear, well-lit photo of the tattoo to cover or extend</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="relative rounded-xl overflow-hidden border-2 border-gold/40 aspect-square max-h-72 mx-auto w-full">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={reworkPhotoPreview} alt="Existing tattoo" className="w-full h-full object-contain bg-surface-2" />
+                  <button
+                    onClick={() => setReworkPhotoPreview(null)}
+                    className="absolute top-2 right-2 w-8 h-8 rounded-full bg-bg/80 border border-cleo-border text-muted hover:text-error transition-colors flex items-center justify-center text-lg cursor-pointer"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Mode: cover vs extend */}
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-mono tracking-[0.15em] uppercase text-muted">What should happen to it?</label>
+              <div className="grid grid-cols-2 gap-2">
+                {([
+                  { key: "cover" as const, label: "Cover Completely", desc: "Fully replace the old tattoo with new art" },
+                  { key: "extend" as const, label: "Extend & Blend", desc: "Build new art around and with the existing ink" },
+                ]).map((opt) => (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    onClick={() => setReworkModeLocal(opt.key)}
+                    className={`text-left px-4 py-3 rounded-xl border transition-all cursor-pointer ${
+                      reworkModeLocal === opt.key
+                        ? "bg-gold/10 border-gold text-ink"
+                        : "bg-bg border-cleo-border text-muted hover:border-gold/40"
+                    }`}
+                  >
+                    <p className="font-cinzel font-bold text-xs uppercase tracking-wide">{opt.label}</p>
+                    <p className="text-[10px] mt-0.5 leading-snug opacity-80">{opt.desc}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Style (optional) */}
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-mono tracking-[0.15em] uppercase text-muted">
+                Tattoo Style <span className="text-muted/50 normal-case">(optional)</span>
+              </label>
+              <StyleSelect value={tattooStyle} onChange={setTattooStyle} />
+            </div>
+
+            {/* Color palette (optional) — reuses the same picker as AI Design */}
+            <div className="flex flex-col gap-2 p-3 bg-bg rounded-xl border border-cleo-border">
+              <div className="flex items-center justify-between gap-3">
+                <label className="text-xs font-mono tracking-[0.15em] uppercase text-muted">
+                  Color Palette <span className="text-muted/40 normal-case">(optional)</span>
+                </label>
+                <div className="flex items-center gap-2 text-[10px] font-mono">
+                  <span className={selectedColors.length > 0 ? "text-gold" : "text-muted/60"}>
+                    {selectedColors.length === 0 ? "Black & grey" : `${selectedColors.length} ink${selectedColors.length === 1 ? "" : "s"}`}
+                  </span>
+                  {selectedColors.length > 0 && (
+                    <button onClick={() => clearColors()} className="text-muted hover:text-gold transition-colors uppercase tracking-wider cursor-pointer">
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {selectedColors.map((hex) => (
+                  <button
+                    key={hex}
+                    type="button"
+                    onClick={() => toggleColor(hex)}
+                    title={`${hex.toUpperCase()} — tap to remove`}
+                    className="relative flex-shrink-0 w-7 h-7 sm:w-8 sm:h-8 rounded-md cursor-pointer ring-1 ring-inset ring-gold shadow-[0_0_0_2px_rgba(201,168,76,0.35)] transition-transform hover:-translate-y-0.5"
+                    style={{ backgroundColor: hex }}
+                  >
+                    <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-error text-white text-[10px] flex items-center justify-center leading-none shadow-sm">×</span>
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setShowColorModal(true)}
+                  className="flex-shrink-0 w-7 h-7 sm:w-8 sm:h-8 rounded-md border border-dashed border-cleo-border hover:border-gold/50 text-muted hover:text-gold transition-colors cursor-pointer flex items-center justify-center text-base leading-none"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+
+            {/* Description */}
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-mono tracking-[0.15em] uppercase text-muted">
+                Describe the New Design <span className="text-error/70 normal-case font-mono">*required</span>
+              </label>
+              <textarea
+                rows={4}
+                placeholder={
+                  reworkModeLocal === "cover"
+                    ? "e.g. A large phoenix rising, wings spread wide, fully covering the old design in black & grey realism…"
+                    : "e.g. Extend the existing rose vine up the forearm, blending in more roses and leaves in the same style…"
+                }
+                value={tattooDescription}
+                onChange={(e) => setTattooDescription(e.target.value)}
+                className="bg-bg border border-cleo-border rounded-xl px-4 py-3.5 text-ink text-sm placeholder:text-muted/50 focus:border-gold focus:outline-none transition-colors resize-none leading-relaxed"
+              />
+            </div>
+
+            <motion.button
+              whileHover={reworkPhotoPreview && tattooDescription.trim() ? { scale: 1.02 } : {}}
+              whileTap={reworkPhotoPreview && tattooDescription.trim() ? { scale: 0.97 } : {}}
+              onClick={handleGenerateRework}
+              disabled={!reworkPhotoPreview || !tattooDescription.trim()}
+              className={`w-full py-4 rounded-xl font-cinzel font-bold text-base tracking-[0.08em] uppercase transition-all border ${
+                reworkPhotoPreview && tattooDescription.trim()
+                  ? "bg-gold text-bg border-gold hover:bg-gold-light cursor-pointer shadow-[0_0_18px_rgba(201,168,76,0.25)]"
+                  : "bg-surface-2 text-muted border-cleo-border cursor-not-allowed"
+              }`}
+            >
+              {!reworkPhotoPreview ? "Add a photo of the existing tattoo" : !tattooDescription.trim() ? "Describe the new design" : "✦ Generate Rework"}
+            </motion.button>
           </motion.div>
         )}
 
