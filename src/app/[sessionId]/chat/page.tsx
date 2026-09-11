@@ -53,6 +53,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
   const [sessionReworkMode, setSessionReworkMode] = useState<"cover" | "extend">(reworkMode);
   const [sessionStyle, setSessionStyle] = useState(tattooStyle);
   const [sessionDescription, setSessionDescription] = useState(tattooDescription);
+  const [sessionSourcePhotoUrl, setSessionSourcePhotoUrl] = useState<string | null>(null);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [instruction, setInstruction] = useState("");
@@ -79,7 +80,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
     async function load() {
       const { data: session } = await supabase
         .from("sessions")
-        .select("user_id, flow_type, rework_mode, tattoo_style, tattoo_description")
+        .select("user_id, flow_type, rework_mode, rework_source_photo_url, tattoo_style, tattoo_description")
         .eq("id", sessionId)
         .maybeSingle();
       if (!cancelled && session) {
@@ -88,6 +89,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
         setSessionReworkMode((session.rework_mode as "cover" | "extend" | null) ?? reworkMode);
         setSessionStyle(session.tattoo_style ?? tattooStyle);
         setSessionDescription(session.tattoo_description ?? tattooDescription);
+        setSessionSourcePhotoUrl(session.rework_source_photo_url ?? null);
       }
 
       const { data: designs } = await supabase
@@ -200,7 +202,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
 
         for (const line of lines) {
           if (!line.trim()) continue;
-          let event: { type: string; image?: { id: string; imageUrl: string }; reason?: string; code?: string };
+          let event: { type: string; image?: { id: string; imageUrl: string }; reason?: string; code?: string; sourcePhotoUrl?: string };
           try { event = JSON.parse(line); } catch { continue; }
 
           if (event.type === "result" && event.image) {
@@ -225,6 +227,10 @@ function ChatInner({ sessionId }: { sessionId: string }) {
             if (event.code === "insufficient_credits") {
               setError("AI generation credits are exhausted. Please contact the admin to top up and restore the service.");
             }
+          } else if (event.type === "done" && event.sourcePhotoUrl) {
+            // Save the uploaded source photo back to the session so a later
+            // reopen (e.g. via "Continue Design") can still show it.
+            await supabase.from("sessions").update({ rework_source_photo_url: event.sourcePhotoUrl }).eq("id", sessionId);
           }
         }
       }
@@ -342,10 +348,10 @@ function ChatInner({ sessionId }: { sessionId: string }) {
             ))}
           </span>
         )}
-        {sessionFlowType === "rework" && reworkPhoto && (
+        {sessionFlowType === "rework" && (reworkPhoto || sessionSourcePhotoUrl) && (
           <div className="w-7 h-7 rounded-md overflow-hidden border border-cleo-border ml-1">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={reworkPhoto} alt="Source" className="w-full h-full object-cover" />
+            <img src={reworkPhoto ?? resolveImageSrc(sessionSourcePhotoUrl!)} alt="Source" className="w-full h-full object-cover" />
           </div>
         )}
       </div>
