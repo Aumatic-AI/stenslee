@@ -11,6 +11,7 @@ create extension if not exists "pgcrypto";
 -- ── Drop existing tables (clean slate, reverse FK order) ────
 drop table if exists user_preferences cascade;
 drop table if exists placements       cascade;
+drop table if exists chat_messages    cascade;
 drop table if exists tattoo_designs   cascade;
 drop table if exists sessions         cascade;
 drop table if exists staff            cascade;
@@ -101,6 +102,28 @@ create index on tattoo_designs(session_id);
 create index on tattoo_designs(session_id, is_finalized);
 
 comment on table tattoo_designs is 'Generated tattoo variants. is_finalized=true = customer approved. All others pruned on finalize_session().';
+
+-- ── 4b. CHAT MESSAGES ────────────────────────────────────────
+-- The chat screen's source of truth for what to render — one row per turn.
+-- A 'user' row is written the moment Send is clicked (before generation even
+-- starts), so it survives a reload even if generation never completes. An
+-- 'assistant' row is created empty alongside it and image_urls/design_ids
+-- grow in place as each result finishes — a reload mid-generation still
+-- shows whatever's already landed, and (with the in-memory job tracker)
+-- keeps appending to this same row once the client resumes polling.
+create table chat_messages (
+  id           uuid        primary key default uuid_generate_v4(),
+  session_id   text        not null references sessions(id) on delete cascade,
+  role         text        not null check (role in ('user', 'assistant')),
+  content      text,
+  image_urls   text[]      not null default '{}',
+  design_ids   uuid[]      not null default '{}',
+  created_at   timestamptz not null default now()
+);
+
+create index on chat_messages(session_id, created_at);
+
+comment on table chat_messages is 'Chat screen transcript — one row per turn. image_urls/design_ids on an assistant row are parallel arrays (same index = same image).';
 
 -- ── 5. PLACEMENTS ───────────────────────────────────────────
 -- Multiple placement attempts per session. Only finalized row survives completion.
@@ -247,6 +270,7 @@ alter table staff            enable row level security;
 alter table users            enable row level security;
 alter table sessions         enable row level security;
 alter table tattoo_designs   enable row level security;
+alter table chat_messages    enable row level security;
 alter table placements       enable row level security;
 alter table user_preferences enable row level security;
 
@@ -273,6 +297,15 @@ create policy "designs: designer own"         on tattoo_designs for all using (
   is_designer() and exists (
     select 1 from sessions s
      where s.id = tattoo_designs.session_id and s.designer_id = auth.uid()
+  )
+);
+
+-- CHAT MESSAGES
+create policy "chat: admin full access" on chat_messages for all using (is_admin());
+create policy "chat: designer own"      on chat_messages for all using (
+  is_designer() and exists (
+    select 1 from sessions s
+     where s.id = chat_messages.session_id and s.designer_id = auth.uid()
   )
 );
 

@@ -102,6 +102,31 @@ export interface Database {
           is_finalized?: boolean;
         };
       };
+      chat_messages: {
+        Row: {
+          id: string;
+          session_id: string;
+          role: "user" | "assistant";
+          content: string | null;
+          image_urls: string[];
+          design_ids: string[];
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          session_id: string;
+          role: "user" | "assistant";
+          content?: string | null;
+          image_urls?: string[];
+          design_ids?: string[];
+          created_at?: string;
+        };
+        Update: {
+          content?: string | null;
+          image_urls?: string[];
+          design_ids?: string[];
+        };
+      };
       placements: {
         Row: {
           id: string;

@@ -37,24 +37,13 @@ async function uploadBase64Direct(dataUrl: string, sessionId: string, prefix: st
   return uploadBlobDirect(blob, sessionId, prefix);
 }
 
-interface DesignRow {
+interface ChatMessage {
   id: string;
-  image_url: string;
-  style_name: string | null;
-  iteration: number;
-  is_finalized: boolean;
-  user_instruction: string | null;
-  parent_design_ids: string[];
+  role: "user" | "assistant";
+  content: string | null;
+  image_urls: string[];
+  design_ids: string[];
   created_at: string;
-}
-
-interface Batch {
-  iteration: number;
-  userInstruction: string | null;
-  images: DesignRow[];
-  /** Thumbnails to show alongside the instruction — the source photo for a
-   *  first rework batch, or the selected image(s) an edit was based on. */
-  referenceUrls: string[];
 }
 
 interface JobSlot {
@@ -81,8 +70,8 @@ function ChatInner({ sessionId }: { sessionId: string }) {
   } = useAppStore();
 
   const [loading, setLoading] = useState(true);
-  const [batches, setBatches] = useState<Batch[]>([]);
-  const [finalizedId, setFinalizedId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [finalizedIds, setFinalizedIds] = useState<Set<string>>(new Set());
   const [reworkDone, setReworkDone] = useState(false);
   const [customerId, setCustomerId] = useState<string | null>(null);
   // Authoritative session context — read from the DB, not just the in-memory
@@ -91,8 +80,6 @@ function ChatInner({ sessionId }: { sessionId: string }) {
   const [sessionFlowType, setSessionFlowType] = useState<"ai_design" | "rework">(flowType);
   const [sessionReworkMode, setSessionReworkMode] = useState<"cover" | "extend">(reworkMode);
   const [sessionStyle, setSessionStyle] = useState(tattooStyle);
-  const [sessionDescription, setSessionDescription] = useState(tattooDescription);
-  const [sessionSourcePhotoUrl, setSessionSourcePhotoUrl] = useState<string | null>(null);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [instruction, setInstruction] = useState("");
@@ -107,21 +94,21 @@ function ChatInner({ sessionId }: { sessionId: string }) {
   const threadEndRef = useRef<HTMLDivElement>(null);
   const processedSlotsRef = useRef<Set<number>>(new Set());
 
-  function findDesign(id: string): DesignRow | undefined {
-    for (const b of batches) {
-      const found = b.images.find((img) => img.id === id);
-      if (found) return found;
+  function findImageUrl(designId: string): string | undefined {
+    for (const m of messages) {
+      const idx = m.design_ids.indexOf(designId);
+      if (idx !== -1) return m.image_urls[idx];
     }
     return undefined;
   }
 
-  // ── Load session + existing thread ─────────────────────────
+  // ── Load session context + full chat transcript ──────────────
   useEffect(() => {
     let cancelled = false;
     async function load() {
       const { data: session } = await supabase
         .from("sessions")
-        .select("user_id, flow_type, rework_mode, rework_source_photo_url, tattoo_style, tattoo_description")
+        .select("user_id, flow_type, rework_mode, tattoo_style")
         .eq("id", sessionId)
         .maybeSingle();
       if (!cancelled && session) {
@@ -129,51 +116,25 @@ function ChatInner({ sessionId }: { sessionId: string }) {
         setSessionFlowType((session.flow_type as "ai_design" | "rework" | null) ?? flowType);
         setSessionReworkMode((session.rework_mode as "cover" | "extend" | null) ?? reworkMode);
         setSessionStyle(session.tattoo_style ?? tattooStyle);
-        setSessionDescription(session.tattoo_description ?? tattooDescription);
-        setSessionSourcePhotoUrl(session.rework_source_photo_url ?? null);
       }
 
-      const { data: designs } = await supabase
-        .from("tattoo_designs")
-        .select("id, image_url, style_name, iteration, is_finalized, user_instruction, parent_design_ids, created_at")
-        .eq("session_id", sessionId)
-        .order("created_at", { ascending: true }) as { data: DesignRow[] | null };
+      const [chatRes, designsRes] = await Promise.all([
+        fetch(`/api/chat?sessionId=${sessionId}`).then((r) => r.json()),
+        supabase.from("tattoo_designs").select("id, is_finalized").eq("session_id", sessionId),
+      ]);
 
       if (cancelled) return;
 
-      const byId = new Map((designs ?? []).map((d) => [d.id, d]));
-      const grouped = new Map<number, Batch>();
-      (designs ?? []).forEach((d) => {
-        const b = grouped.get(d.iteration) ?? {
-          iteration: d.iteration,
-          userInstruction: d.user_instruction,
-          images: [],
-          referenceUrls: (d.parent_design_ids ?? [])
-            .map((pid) => byId.get(pid)?.image_url)
-            .filter((u): u is string => !!u),
-        };
-        b.images.push(d);
-        grouped.set(d.iteration, b);
-      });
-      const sortedBatches = [...grouped.values()].sort((a, b) => a.iteration - b.iteration);
-      // First batch of a rework thread has no parent — its "reference" is the
-      // original uploaded photo instead.
-      if (sortedBatches[0] && sortedBatches[0].referenceUrls.length === 0) {
-        const sourceUrl = session?.rework_source_photo_url;
-        if (sourceUrl) sortedBatches[0].referenceUrls = [sourceUrl];
-      }
-      setBatches(sortedBatches);
-
-      const finalized = (designs ?? []).find((d) => d.is_finalized);
-      if (finalized) setFinalizedId(finalized.id);
-
+      const loadedMessages: ChatMessage[] = chatRes.messages ?? [];
+      setMessages(loadedMessages);
+      setFinalizedIds(new Set((designsRes.data ?? []).filter((d) => d.is_finalized).map((d) => d.id)));
       setLoading(false);
 
       if (editTargetId) {
         setSelectedIds(new Set([editTargetId]));
       }
 
-      if (pendingGeneration && !didKickoffRef.current && sortedBatches.length === 0) {
+      if (pendingGeneration && !didKickoffRef.current && loadedMessages.length === 0) {
         didKickoffRef.current = true;
         setPendingGeneration(false);
         startGeneration(true, []);
@@ -186,18 +147,11 @@ function ChatInner({ sessionId }: { sessionId: string }) {
         didKickoffRef.current = true;
         const res = await fetch(`/api/generation-status?sessionId=${sessionId}`);
         const status = await res.json();
-        if (!cancelled && status.found && !status.done) {
-          const alreadyHave = sortedBatches.find((b) => b.iteration === status.iteration)?.images.length ?? 0;
-          processedSlotsRef.current = new Set(Array.from({ length: alreadyHave }, (_, i) => i));
-          const referenceUrls: string[] = (status.parentDesignIds ?? [])
-            .map((pid: string) => byId.get(pid)?.image_url)
-            .filter((u: string | undefined): u is string => !!u);
-          setBatches((prev) => {
-            if (prev.some((b) => b.iteration === status.iteration)) return prev;
-            return [...prev, { iteration: status.iteration, userInstruction: status.userInstruction, images: [], referenceUrls }];
-          });
+        const lastMessage = loadedMessages[loadedMessages.length - 1];
+        if (!cancelled && status.found && !status.done && lastMessage?.role === "assistant") {
+          processedSlotsRef.current = new Set(Array.from({ length: lastMessage.image_urls.length }, (_, i) => i));
           setSending(true);
-          watchJob(status.iteration, status.parentDesignIds ?? [], status.userInstruction ?? undefined);
+          watchJob(lastMessage.id, status.iteration);
         }
       }
     }
@@ -208,11 +162,14 @@ function ChatInner({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     threadEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [batches, pendingCount]);
+  }, [messages, pendingCount]);
 
-  // ── Poll a running job until every slot resolves ─────────────
-  async function watchJob(iteration: number, parentDesignIds: string[], userInstruction: string | undefined) {
+  // ── Poll a running job, appending each completed image to the
+  // assistant message as it lands ─────────────────────────────
+  async function watchJob(assistantMessageId: string, iteration: number) {
     const prefix = sessionFlowType === "rework" ? "rework" : "designs";
+    const imageUrls: string[] = messages.find((m) => m.id === assistantMessageId)?.image_urls.slice() ?? [];
+    const designIds: string[] = messages.find((m) => m.id === assistantMessageId)?.design_ids.slice() ?? [];
 
     while (true) {
       let status: { found: boolean; done: boolean; slots: JobSlot[] };
@@ -245,19 +202,14 @@ function ChatInner({ sessionId }: { sessionId: string }) {
           const imageUrl = await uploadBase64Direct(slot.imageBase64, sessionId, prefix);
           const [persisted] = await persistDesigns(
             [{ id: `kei-${iteration}-${i}`, imageUrl, gradient: "", patternType: "mandala", styleName: `Variation ${i + 1}` }],
-            { iteration, parentDesignIds, userInstruction }
+            { iteration }
           );
-          const row: DesignRow = {
-            id: persisted.dbId ?? persisted.id,
-            image_url: persisted.imageUrl!,
-            style_name: persisted.styleName,
-            iteration,
-            is_finalized: false,
-            user_instruction: userInstruction ?? null,
-            parent_design_ids: parentDesignIds,
-            created_at: new Date().toISOString(),
-          };
-          setBatches((prev) => prev.map((b) => (b.iteration === iteration ? { ...b, images: [...b.images, row] } : b)));
+          const designId = persisted.dbId ?? persisted.id;
+          imageUrls.push(persisted.imageUrl!);
+          designIds.push(designId);
+
+          await supabase.from("chat_messages").update({ image_urls: imageUrls, design_ids: designIds }).eq("id", assistantMessageId);
+          setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? { ...m, image_urls: [...imageUrls], design_ids: [...designIds] } : m)));
         } catch (err) {
           setError((err as Error).message);
         }
@@ -281,29 +233,49 @@ function ChatInner({ sessionId }: { sessionId: string }) {
     setPendingCount(thisCount);
     processedSlotsRef.current = new Set();
 
-    const selectedRows = editSourceIds.map(findDesign).filter((r): r is DesignRow => !!r);
-    const editSourceUrls = selectedRows.map((r) => r.image_url);
-    const instructionForTurn = isFirst ? undefined : instruction.trim();
-    const nextIteration = batches.length > 0 ? Math.max(...batches.map((b) => b.iteration)) + 1 : 1;
-
-    const referenceUrls = isFirst
-      ? sessionFlowType === "rework"
-        ? (reworkPhoto ? [reworkPhoto] : [])
-        : referenceImages.slice(0, 5)
-      : editSourceUrls;
-
-    setBatches((prev) => [...prev, { iteration: nextIteration, userInstruction: instructionForTurn ?? null, images: [], referenceUrls }]);
+    const editSourceUrls = editSourceIds.map(findImageUrl).filter((u): u is string => !!u);
+    const instructionForTurn = isFirst ? tattooDescription : instruction.trim();
+    const iteration = messages.filter((m) => m.role === "assistant").length + 1;
 
     try {
+      // Resolve the reference image(s) to durable URLs *before* recording the
+      // user message, so the message always stores something that survives.
+      let referenceUrls: string[];
+      if (isFirst) {
+        if (sessionFlowType === "rework") {
+          referenceUrls = reworkPhoto ? [await uploadPhotoDirect(reworkPhoto, sessionId, "rework-source")] : [];
+        } else {
+          const localRefs = referenceImages.filter((r) => r.startsWith("blob:") || r.startsWith("data:"));
+          const hostedRefs = referenceImages.filter((r) => !r.startsWith("blob:") && !r.startsWith("data:"));
+          const uploadedRefs = await Promise.all(localRefs.map((r) => uploadPhotoDirect(r, sessionId, "refs")));
+          referenceUrls = [...uploadedRefs, ...hostedRefs];
+        }
+      } else {
+        referenceUrls = editSourceUrls;
+      }
+
+      const { data: userMsg } = await supabase
+        .from("chat_messages")
+        .insert({ session_id: sessionId, role: "user", content: instructionForTurn, image_urls: referenceUrls })
+        .select()
+        .single();
+      const { data: assistantMsg } = await supabase
+        .from("chat_messages")
+        .insert({ session_id: sessionId, role: "assistant", content: null, image_urls: [], design_ids: [] })
+        .select()
+        .single();
+
+      setMessages((prev) => [...prev, userMsg as ChatMessage, assistantMsg as ChatMessage]);
+
       let res: Response;
       if (sessionFlowType === "rework") {
         const body: Record<string, unknown> = {
-          sessionId, iteration: nextIteration, mode: sessionReworkMode, count: thisCount,
+          sessionId, iteration, mode: sessionReworkMode, count: thisCount,
           parentDesignIds: isFirst ? [] : editSourceIds,
         };
         if (isFirst) {
-          body.description = sessionDescription;
-          if (reworkPhoto) body.sourcePhotoUrl = await uploadPhotoDirect(reworkPhoto, sessionId, "rework-source");
+          body.description = instructionForTurn;
+          body.sourcePhotoUrl = referenceUrls[0];
         } else {
           body.editInstruction = instructionForTurn;
           body.editSourceUrls = editSourceUrls;
@@ -312,16 +284,9 @@ function ChatInner({ sessionId }: { sessionId: string }) {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
         });
       } else {
-        const localRefs = referenceImages.filter((r) => r.startsWith("blob:") || r.startsWith("data:"));
-        const hostedRefs = referenceImages.filter((r) => !r.startsWith("blob:") && !r.startsWith("data:"));
-        // Upload local refs straight from the browser instead of sending base64
-        // to the server to upload — same reliability fix as the rework photo.
-        const uploadedRefs = isFirst
-          ? await Promise.all(localRefs.map((r) => uploadPhotoDirect(r, sessionId, "refs")))
-          : [];
         const body: Record<string, unknown> = {
-          sessionId, iteration: nextIteration, description: sessionDescription, style: sessionStyle,
-          images: [], referenceImageUrls: isFirst ? [...uploadedRefs, ...hostedRefs] : [],
+          sessionId, iteration, description: instructionForTurn, style: sessionStyle,
+          images: [], referenceImageUrls: isFirst ? referenceUrls : [],
           isTextTattoo, colors: selectedColors, targetBodyArea, count: thisCount,
           parentDesignIds: isFirst ? [] : editSourceIds,
           ...(isTextTattoo && textTattooFont ? { textTattooFont } : {}),
@@ -329,7 +294,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
         if (!isFirst) {
           body.refineImageUrls = editSourceUrls;
           body.refinementText = instructionForTurn;
-          body.selectedDesignNames = selectedRows.map((r) => r.style_name ?? "Design");
+          body.selectedDesignNames = editSourceIds.map((_, i) => `Design ${i + 1}`);
         }
         res = await fetch("/api/generate", {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -341,14 +306,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
         throw new Error(json.error ?? "Generation failed");
       }
 
-      const started = await res.json();
-      if (started.sourcePhotoUrl) {
-        // Save the uploaded source photo back to the session so a later
-        // reopen (e.g. via "Continue Design") can still show it.
-        await supabase.from("sessions").update({ rework_source_photo_url: started.sourcePhotoUrl }).eq("id", sessionId);
-      }
-
-      await watchJob(nextIteration, isFirst ? [] : editSourceIds, instructionForTurn);
+      await watchJob(assistantMsg.id, iteration);
     } catch (err) {
       setError((err as Error).message);
       setSending(false);
@@ -372,11 +330,11 @@ function ChatInner({ sessionId }: { sessionId: string }) {
     startGeneration(false, [...selectedIds]);
   }
 
-  async function handleUse(row: DesignRow) {
+  async function handleUse(designId: string, imageUrl: string) {
     if (sessionFlowType === "rework") {
-      setFinalizing(row.id);
+      setFinalizing(designId);
       try {
-        await finalizeReworkSession(row.id);
+        await finalizeReworkSession(designId);
         setReworkDone(true);
       } catch (err) {
         setError((err as Error).message);
@@ -384,7 +342,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
         setFinalizing(null);
       }
     } else {
-      selectDesign({ id: row.id, dbId: row.id, gradient: "", patternType: "mandala", styleName: row.style_name ?? "Design", imageUrl: row.image_url });
+      selectDesign({ id: designId, dbId: designId, gradient: "", patternType: "mandala", styleName: "Design", imageUrl });
       router.push(`/${sessionId}/placement`);
     }
   }
@@ -432,7 +390,8 @@ function ChatInner({ sessionId }: { sessionId: string }) {
         ...(targetBodyArea ? [{ label: targetBodyArea }] : []),
       ];
 
-  const viewingRow = viewingId ? findDesign(viewingId) : null;
+  const viewingUrl = viewingId ? findImageUrl(viewingId) : undefined;
+  const lastAssistantId = [...messages].reverse().find((m) => m.role === "assistant")?.id;
 
   return (
     <div className="flex flex-col h-[calc(100vh-57px)]">
@@ -453,24 +412,17 @@ function ChatInner({ sessionId }: { sessionId: string }) {
             ))}
           </span>
         )}
-        {sessionFlowType === "rework" && (reworkPhoto || sessionSourcePhotoUrl) && (
-          <div className="w-7 h-7 rounded-md overflow-hidden border border-cleo-border ml-1">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={reworkPhoto ?? resolveImageSrc(sessionSourcePhotoUrl!)} alt="Source" className="w-full h-full object-cover" />
-          </div>
-        )}
       </div>
 
       {/* Thread */}
-      <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 flex flex-col gap-6">
-        {batches.map((batch) => (
-          <div key={batch.iteration} className="flex flex-col gap-3">
-            {/* "User" message */}
-            <div className="flex justify-end">
+      <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 flex flex-col gap-4">
+        {messages.map((msg) => (
+          msg.role === "user" ? (
+            <div key={msg.id} className="flex justify-end">
               <div className="max-w-[85%] sm:max-w-md bg-gold/10 border border-gold/30 rounded-2xl rounded-tr-sm px-4 py-2.5 flex flex-col gap-2">
-                {batch.referenceUrls.length > 0 && (
+                {msg.image_urls.length > 0 && (
                   <div className="flex gap-1.5 flex-wrap justify-end">
-                    {batch.referenceUrls.map((url, i) => (
+                    {msg.image_urls.map((url, i) => (
                       <div key={i} className="w-14 h-14 rounded-lg overflow-hidden border border-gold/30 flex-shrink-0">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={resolveImageSrc(url)} alt="Reference" className="w-full h-full object-cover" />
@@ -478,29 +430,27 @@ function ChatInner({ sessionId }: { sessionId: string }) {
                     ))}
                   </div>
                 )}
-                <p className="text-ink text-sm leading-relaxed">
-                  {batch.userInstruction ?? sessionDescription}
-                </p>
+                {msg.content && <p className="text-ink text-sm leading-relaxed">{msg.content}</p>}
               </div>
             </div>
-
-            {/* AI response — grid of images for this batch */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5 sm:gap-3 max-w-3xl">
-              {batch.images.map((row) => {
-                const isSelected = selectedIds.has(row.id);
-                const isFinalized = row.id === finalizedId;
+          ) : (
+            <div key={msg.id} className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5 sm:gap-3 max-w-3xl">
+              {msg.design_ids.map((designId, i) => {
+                const url = msg.image_urls[i];
+                const isSelected = selectedIds.has(designId);
+                const isFinalized = finalizedIds.has(designId);
                 return (
                   <div
-                    key={row.id}
-                    onClick={() => setViewingId(row.id)}
+                    key={designId}
+                    onClick={() => setViewingId(designId)}
                     className="relative group rounded-xl overflow-hidden border border-cleo-border bg-surface-2 cursor-pointer"
                     style={{ aspectRatio: "1" }}
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={resolveImageSrc(row.image_url)} alt={row.style_name ?? "Design"} className="w-full h-full object-cover" />
+                    <img src={resolveImageSrc(url)} alt="Design" className="w-full h-full object-cover" />
 
                     <button
-                      onClick={(e) => { e.stopPropagation(); toggleSelect(row.id); }}
+                      onClick={(e) => { e.stopPropagation(); toggleSelect(designId); }}
                       className={`absolute top-1.5 left-1.5 w-5 h-5 rounded-md border flex items-center justify-center transition-colors cursor-pointer ${
                         isSelected ? "bg-gold border-gold" : "bg-black/50 border-white/40 hover:border-gold"
                       }`}
@@ -520,18 +470,18 @@ function ChatInner({ sessionId }: { sessionId: string }) {
                     )}
 
                     <button
-                      onClick={(e) => { e.stopPropagation(); handleUse(row); }}
-                      disabled={finalizing === row.id}
+                      onClick={(e) => { e.stopPropagation(); handleUse(designId, url); }}
+                      disabled={finalizing === designId}
                       className="absolute bottom-0 left-0 right-0 bg-black/70 backdrop-blur-sm text-white text-[10px] font-mono uppercase tracking-wider py-1.5 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer hover:bg-gold hover:text-bg disabled:opacity-50"
                     >
-                      {finalizing === row.id ? "Saving…" : "✦ Use this"}
+                      {finalizing === designId ? "Saving…" : "✦ Use this"}
                     </button>
                   </div>
                 );
               })}
 
               {/* Loading placeholders for the in-flight batch */}
-              {sending && batch.iteration === batches[batches.length - 1]?.iteration &&
+              {sending && msg.id === lastAssistantId &&
                 Array.from({ length: pendingCount }).map((_, i) => (
                   <div key={`loading-${i}`} className="rounded-xl overflow-hidden border border-cleo-border" style={{ aspectRatio: "1" }}>
                     <div className="w-full h-full skeleton flex items-center justify-center">
@@ -541,7 +491,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
                 ))
               }
             </div>
-          </div>
+          )
         ))}
 
         {error && (
@@ -599,7 +549,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
       </div>
 
       {/* Full-screen viewer */}
-      {viewingRow && (
+      {viewingId && viewingUrl && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -616,25 +566,25 @@ function ChatInner({ sessionId }: { sessionId: string }) {
           <div onClick={(e) => e.stopPropagation()} className="flex flex-col items-center gap-4 max-w-2xl w-full">
             <div className="relative w-full rounded-2xl overflow-hidden border border-cleo-border" style={{ aspectRatio: "1" }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={resolveImageSrc(viewingRow.image_url)} alt={viewingRow.style_name ?? "Design"} className="w-full h-full object-contain bg-black" />
+              <img src={resolveImageSrc(viewingUrl)} alt="Design" className="w-full h-full object-contain bg-black" />
             </div>
             <div className="flex items-center gap-3 w-full max-w-sm">
               <button
-                onClick={() => { toggleSelect(viewingRow.id); setViewingId(null); }}
+                onClick={() => { toggleSelect(viewingId); setViewingId(null); }}
                 className={`flex-1 py-3 rounded-xl font-cinzel font-bold text-xs tracking-[0.08em] uppercase border transition-colors cursor-pointer ${
-                  selectedIds.has(viewingRow.id)
+                  selectedIds.has(viewingId)
                     ? "bg-gold text-bg border-gold"
                     : "bg-transparent text-white border-white/30 hover:border-gold"
                 }`}
               >
-                {selectedIds.has(viewingRow.id) ? "✓ Selected" : "Select to Edit"}
+                {selectedIds.has(viewingId) ? "✓ Selected" : "Select to Edit"}
               </button>
               <button
-                onClick={() => { setViewingId(null); handleUse(viewingRow); }}
-                disabled={finalizing === viewingRow.id}
+                onClick={() => { const id = viewingId; const url = viewingUrl; setViewingId(null); handleUse(id, url); }}
+                disabled={finalizing === viewingId}
                 className="flex-1 py-3 rounded-xl bg-gold text-bg font-cinzel font-bold text-xs tracking-[0.08em] uppercase border border-gold hover:bg-gold-light transition-colors cursor-pointer disabled:opacity-50"
               >
-                {finalizing === viewingRow.id ? "Saving…" : "✦ Use this"}
+                {finalizing === viewingId ? "Saving…" : "✦ Use this"}
               </button>
             </div>
           </div>
