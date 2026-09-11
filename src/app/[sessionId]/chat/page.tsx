@@ -57,7 +57,15 @@ interface Batch {
   referenceUrls: string[];
 }
 
+interface JobSlot {
+  status: "pending" | "done" | "error";
+  imageBase64?: string;
+  reason?: string;
+  code?: string;
+}
+
 const COUNT_OPTIONS = [1, 2, 3, 4, 5] as const;
+const POLL_INTERVAL_MS = 1500;
 
 function ChatInner({ sessionId }: { sessionId: string }) {
   const router = useRouter();
@@ -93,9 +101,11 @@ function ChatInner({ sessionId }: { sessionId: string }) {
   const [pendingCount, setPendingCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [finalizing, setFinalizing] = useState<string | null>(null);
+  const [viewingId, setViewingId] = useState<string | null>(null);
 
   const didKickoffRef = useRef(false);
   const threadEndRef = useRef<HTMLDivElement>(null);
+  const processedSlotsRef = useRef<Set<number>>(new Set());
 
   function findDesign(id: string): DesignRow | undefined {
     for (const b of batches) {
@@ -166,7 +176,29 @@ function ChatInner({ sessionId }: { sessionId: string }) {
       if (pendingGeneration && !didKickoffRef.current && sortedBatches.length === 0) {
         didKickoffRef.current = true;
         setPendingGeneration(false);
-        runGeneration(true, []);
+        startGeneration(true, []);
+        return;
+      }
+
+      // Resume watching a generation that was still running when this page
+      // loaded (e.g. a reload mid-generation, or reopening from another tab).
+      if (!didKickoffRef.current) {
+        didKickoffRef.current = true;
+        const res = await fetch(`/api/generation-status?sessionId=${sessionId}`);
+        const status = await res.json();
+        if (!cancelled && status.found && !status.done) {
+          const alreadyHave = sortedBatches.find((b) => b.iteration === status.iteration)?.images.length ?? 0;
+          processedSlotsRef.current = new Set(Array.from({ length: alreadyHave }, (_, i) => i));
+          const referenceUrls: string[] = (status.parentDesignIds ?? [])
+            .map((pid: string) => byId.get(pid)?.image_url)
+            .filter((u: string | undefined): u is string => !!u);
+          setBatches((prev) => {
+            if (prev.some((b) => b.iteration === status.iteration)) return prev;
+            return [...prev, { iteration: status.iteration, userInstruction: status.userInstruction, images: [], referenceUrls }];
+          });
+          setSending(true);
+          watchJob(status.iteration, status.parentDesignIds ?? [], status.userInstruction ?? undefined);
+        }
       }
     }
     load();
@@ -178,12 +210,76 @@ function ChatInner({ sessionId }: { sessionId: string }) {
     threadEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [batches, pendingCount]);
 
-  // ── Generation / edit ───────────────────────────────────────
-  async function runGeneration(isFirst: boolean, editSourceIds: string[]) {
+  // ── Poll a running job until every slot resolves ─────────────
+  async function watchJob(iteration: number, parentDesignIds: string[], userInstruction: string | undefined) {
+    const prefix = sessionFlowType === "rework" ? "rework" : "designs";
+
+    while (true) {
+      let status: { found: boolean; done: boolean; slots: JobSlot[] };
+      try {
+        const res = await fetch(`/api/generation-status?sessionId=${sessionId}`);
+        status = await res.json();
+      } catch {
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+        continue;
+      }
+
+      if (!status.found) break; // expired/unknown — nothing more to watch
+
+      for (let i = 0; i < status.slots.length; i++) {
+        if (processedSlotsRef.current.has(i)) continue;
+        const slot = status.slots[i];
+        if (slot.status === "pending") continue;
+        processedSlotsRef.current.add(i);
+        setPendingCount((c) => Math.max(0, c - 1));
+
+        if (slot.status === "error") {
+          if (slot.code === "insufficient_credits") {
+            setError("AI generation credits are exhausted. Please contact the admin to top up and restore the service.");
+          }
+          continue;
+        }
+        if (!slot.imageBase64) continue;
+
+        try {
+          const imageUrl = await uploadBase64Direct(slot.imageBase64, sessionId, prefix);
+          const [persisted] = await persistDesigns(
+            [{ id: `kei-${iteration}-${i}`, imageUrl, gradient: "", patternType: "mandala", styleName: `Variation ${i + 1}` }],
+            { parentDesignIds, userInstruction }
+          );
+          const row: DesignRow = {
+            id: persisted.dbId ?? persisted.id,
+            image_url: persisted.imageUrl!,
+            style_name: persisted.styleName,
+            iteration,
+            is_finalized: false,
+            user_instruction: userInstruction ?? null,
+            parent_design_ids: parentDesignIds,
+            created_at: new Date().toISOString(),
+          };
+          setBatches((prev) => prev.map((b) => (b.iteration === iteration ? { ...b, images: [...b.images, row] } : b)));
+        } catch (err) {
+          setError((err as Error).message);
+        }
+      }
+
+      if (status.done) break;
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    }
+
+    setSending(false);
+    setPendingCount(0);
+    setSelectedIds(new Set());
+    setInstruction("");
+  }
+
+  // ── Start a new generation / edit ────────────────────────────
+  async function startGeneration(isFirst: boolean, editSourceIds: string[]) {
     setSending(true);
     setError(null);
     const thisCount = isFirst ? 5 : count;
     setPendingCount(thisCount);
+    processedSlotsRef.current = new Set();
 
     const selectedRows = editSourceIds.map(findDesign).filter((r): r is DesignRow => !!r);
     const editSourceUrls = selectedRows.map((r) => r.image_url);
@@ -202,7 +298,8 @@ function ChatInner({ sessionId }: { sessionId: string }) {
       let res: Response;
       if (sessionFlowType === "rework") {
         const body: Record<string, unknown> = {
-          sessionId, mode: sessionReworkMode, count: thisCount,
+          sessionId, iteration: nextIteration, mode: sessionReworkMode, count: thisCount,
+          parentDesignIds: isFirst ? [] : editSourceIds,
         };
         if (isFirst) {
           body.description = sessionDescription;
@@ -223,9 +320,10 @@ function ChatInner({ sessionId }: { sessionId: string }) {
           ? await Promise.all(localRefs.map((r) => uploadPhotoDirect(r, sessionId, "refs")))
           : [];
         const body: Record<string, unknown> = {
-          sessionId, description: sessionDescription, style: sessionStyle,
+          sessionId, iteration: nextIteration, description: sessionDescription, style: sessionStyle,
           images: [], referenceImageUrls: isFirst ? [...uploadedRefs, ...hostedRefs] : [],
           isTextTattoo, colors: selectedColors, targetBodyArea, count: thisCount,
+          parentDesignIds: isFirst ? [] : editSourceIds,
           ...(isTextTattoo && textTattooFont ? { textTattooFont } : {}),
         };
         if (!isFirst) {
@@ -243,65 +341,16 @@ function ChatInner({ sessionId }: { sessionId: string }) {
         throw new Error(json.error ?? "Generation failed");
       }
 
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let slotIndex = 0;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          let event: { type: string; image?: { id: string; imageBase64: string }; reason?: string; code?: string; sourcePhotoUrl?: string };
-          try { event = JSON.parse(line); } catch { continue; }
-
-          if (event.type === "result" && event.image) {
-            const i = slotIndex++;
-            try {
-              const prefix = sessionFlowType === "rework" ? "rework" : "designs";
-              const imageUrl = await uploadBase64Direct(event.image.imageBase64, sessionId, prefix);
-              const [persisted] = await persistDesigns(
-                [{ id: event.image.id, imageUrl, gradient: "", patternType: "mandala", styleName: `Variation ${i + 1}` }],
-                { parentDesignIds: isFirst ? [] : editSourceIds, userInstruction: instructionForTurn }
-              );
-              const row: DesignRow = {
-                id: persisted.dbId ?? persisted.id,
-                image_url: persisted.imageUrl!,
-                style_name: persisted.styleName,
-                iteration: nextIteration,
-                is_finalized: false,
-                user_instruction: instructionForTurn ?? null,
-                parent_design_ids: isFirst ? [] : editSourceIds,
-                created_at: new Date().toISOString(),
-              };
-              setBatches((prev) => prev.map((b) => (b.iteration === nextIteration ? { ...b, images: [...b.images, row] } : b)));
-            } catch (err) {
-              setError((err as Error).message);
-            } finally {
-              setPendingCount((c) => Math.max(0, c - 1));
-            }
-          } else if (event.type === "error") {
-            setPendingCount((c) => Math.max(0, c - 1));
-            if (event.code === "insufficient_credits") {
-              setError("AI generation credits are exhausted. Please contact the admin to top up and restore the service.");
-            }
-          } else if (event.type === "done" && event.sourcePhotoUrl) {
-            // Save the uploaded source photo back to the session so a later
-            // reopen (e.g. via "Continue Design") can still show it.
-            await supabase.from("sessions").update({ rework_source_photo_url: event.sourcePhotoUrl }).eq("id", sessionId);
-          }
-        }
+      const started = await res.json();
+      if (started.sourcePhotoUrl) {
+        // Save the uploaded source photo back to the session so a later
+        // reopen (e.g. via "Continue Design") can still show it.
+        await supabase.from("sessions").update({ rework_source_photo_url: started.sourcePhotoUrl }).eq("id", sessionId);
       }
-      setSelectedIds(new Set());
-      setInstruction("");
+
+      await watchJob(nextIteration, isFirst ? [] : editSourceIds, instructionForTurn);
     } catch (err) {
       setError((err as Error).message);
-    } finally {
       setSending(false);
       setPendingCount(0);
     }
@@ -320,7 +369,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
     if (sending) return;
     if (selectedIds.size === 0) { setError("Select at least one image to edit — the instruction alone isn't enough, pick what it applies to."); return; }
     if (!instruction.trim()) return;
-    runGeneration(false, [...selectedIds]);
+    startGeneration(false, [...selectedIds]);
   }
 
   async function handleUse(row: DesignRow) {
@@ -338,12 +387,6 @@ function ChatInner({ sessionId }: { sessionId: string }) {
       selectDesign({ id: row.id, dbId: row.id, gradient: "", patternType: "mandala", styleName: row.style_name ?? "Design", imageUrl: row.image_url });
       router.push(`/${sessionId}/placement`);
     }
-  }
-
-  async function handleDelete(row: DesignRow) {
-    setBatches((prev) => prev.map((b) => ({ ...b, images: b.images.filter((img) => img.id !== row.id) })));
-    setSelectedIds((prev) => { const next = new Set(prev); next.delete(row.id); return next; });
-    await supabase.from("tattoo_designs").delete().eq("id", row.id);
   }
 
   if (loading) {
@@ -388,6 +431,8 @@ function ChatInner({ sessionId }: { sessionId: string }) {
         ...(sessionStyle ? [{ label: sessionStyle }] : []),
         ...(targetBodyArea ? [{ label: targetBodyArea }] : []),
       ];
+
+  const viewingRow = viewingId ? findDesign(viewingId) : null;
 
   return (
     <div className="flex flex-col h-[calc(100vh-57px)]">
@@ -445,12 +490,17 @@ function ChatInner({ sessionId }: { sessionId: string }) {
                 const isSelected = selectedIds.has(row.id);
                 const isFinalized = row.id === finalizedId;
                 return (
-                  <div key={row.id} className="relative group rounded-xl overflow-hidden border border-cleo-border bg-surface-2" style={{ aspectRatio: "1" }}>
+                  <div
+                    key={row.id}
+                    onClick={() => setViewingId(row.id)}
+                    className="relative group rounded-xl overflow-hidden border border-cleo-border bg-surface-2 cursor-pointer"
+                    style={{ aspectRatio: "1" }}
+                  >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={resolveImageSrc(row.image_url)} alt={row.style_name ?? "Design"} className="w-full h-full object-cover" />
 
                     <button
-                      onClick={() => toggleSelect(row.id)}
+                      onClick={(e) => { e.stopPropagation(); toggleSelect(row.id); }}
                       className={`absolute top-1.5 left-1.5 w-5 h-5 rounded-md border flex items-center justify-center transition-colors cursor-pointer ${
                         isSelected ? "bg-gold border-gold" : "bg-black/50 border-white/40 hover:border-gold"
                       }`}
@@ -463,14 +513,6 @@ function ChatInner({ sessionId }: { sessionId: string }) {
                       )}
                     </button>
 
-                    <button
-                      onClick={() => handleDelete(row)}
-                      className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-black/50 border border-white/40 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer hover:border-error hover:text-error"
-                      title="Delete this version"
-                    >
-                      ×
-                    </button>
-
                     {isFinalized && (
                       <div className="absolute top-1.5 left-1.5 right-1.5 flex justify-center">
                         <span className="text-[9px] font-mono uppercase tracking-wider bg-gold text-bg px-2 py-0.5 rounded-full">Finalized</span>
@@ -478,7 +520,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
                     )}
 
                     <button
-                      onClick={() => handleUse(row)}
+                      onClick={(e) => { e.stopPropagation(); handleUse(row); }}
                       disabled={finalizing === row.id}
                       className="absolute bottom-0 left-0 right-0 bg-black/70 backdrop-blur-sm text-white text-[10px] font-mono uppercase tracking-wider py-1.5 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer hover:bg-gold hover:text-bg disabled:opacity-50"
                     >
@@ -555,6 +597,49 @@ function ChatInner({ sessionId }: { sessionId: string }) {
           </button>
         </div>
       </div>
+
+      {/* Full-screen viewer */}
+      {viewingRow && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          onClick={() => setViewingId(null)}
+          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 sm:p-8"
+        >
+          <button
+            onClick={() => setViewingId(null)}
+            className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors flex items-center justify-center text-xl cursor-pointer"
+            aria-label="Close"
+          >
+            ×
+          </button>
+          <div onClick={(e) => e.stopPropagation()} className="flex flex-col items-center gap-4 max-w-2xl w-full">
+            <div className="relative w-full rounded-2xl overflow-hidden border border-cleo-border" style={{ aspectRatio: "1" }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={resolveImageSrc(viewingRow.image_url)} alt={viewingRow.style_name ?? "Design"} className="w-full h-full object-contain bg-black" />
+            </div>
+            <div className="flex items-center gap-3 w-full max-w-sm">
+              <button
+                onClick={() => { toggleSelect(viewingRow.id); setViewingId(null); }}
+                className={`flex-1 py-3 rounded-xl font-cinzel font-bold text-xs tracking-[0.08em] uppercase border transition-colors cursor-pointer ${
+                  selectedIds.has(viewingRow.id)
+                    ? "bg-gold text-bg border-gold"
+                    : "bg-transparent text-white border-white/30 hover:border-gold"
+                }`}
+              >
+                {selectedIds.has(viewingRow.id) ? "✓ Selected" : "Select to Edit"}
+              </button>
+              <button
+                onClick={() => { setViewingId(null); handleUse(viewingRow); }}
+                disabled={finalizing === viewingRow.id}
+                className="flex-1 py-3 rounded-xl bg-gold text-bg font-cinzel font-bold text-xs tracking-[0.08em] uppercase border border-gold hover:bg-gold-light transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {finalizing === viewingRow.id ? "Saving…" : "✦ Use this"}
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      )}
     </div>
   );
 }

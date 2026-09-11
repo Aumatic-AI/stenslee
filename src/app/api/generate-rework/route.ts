@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { createKeiTask, waitForKeiTask, KeiTaskFailedError, KeiCreditsError } from "@/lib/kei-api";
 import { buildReworkPrompt } from "@/lib/prompts-rework";
 import { uploadBase64 } from "@/lib/storage";
+import { startJob, setSlot } from "@/lib/generation-jobs";
 
 // Fetching from KEI works reliably from this server (unlike uploading TO
 // Supabase, which doesn't) — so download the result here but hand the bytes
@@ -36,6 +37,7 @@ export const maxDuration = 300;
 export async function POST(req: NextRequest) {
   const {
     sessionId,
+    iteration,
     description = "",
     mode,
     style = "",
@@ -45,10 +47,14 @@ export async function POST(req: NextRequest) {
     sourcePhotoUrl,    // already-hosted — first generation, resumed session
     editInstruction = "",
     editSourceUrls = [] as string[],
+    parentDesignIds = [] as string[], // tattoo_designs.id values — for job/lineage tracking, not generation input
   } = await req.json();
 
   if (mode !== "cover" && mode !== "extend") {
     return Response.json({ error: "mode must be 'cover' or 'extend'" }, { status: 400 });
+  }
+  if (!sessionId || typeof iteration !== "number") {
+    return Response.json({ error: "sessionId and iteration are required" }, { status: 400 });
   }
 
   const isEdit = editInstruction.trim().length > 0;
@@ -85,40 +91,35 @@ export async function POST(req: NextRequest) {
     editInstruction: isEdit ? editInstruction : undefined,
   });
 
-  const { readable, writable } = new TransformStream();
-  const writer = writable.getWriter();
-  const encoder = new TextEncoder();
-  const emit = (event: object) => writer.write(encoder.encode(JSON.stringify(event) + "\n"));
+  const clampedCount = Math.min(5, Math.max(1, Number(count) || 5));
+  startJob(sessionId, iteration, clampedCount, isEdit ? parentDesignIds : [], isEdit ? editInstruction : null);
 
-  (async () => {
-    const clampedCount = Math.min(5, Math.max(1, Number(count) || 5));
-    const tasks = Array.from({ length: clampedCount }, (_, index) =>
-      runOneTask(prompt, inputUrls)
-        .then(async (result) => {
-          if (!result.ok) {
-            console.warn(`[generate-rework] task ${index} failed: ${result.reason}`);
-            await emit({ type: "error", index, reason: result.reason, ...(result.credits ? { code: "insufficient_credits" } : {}) });
-            return;
-          }
-          try {
-            const imageBase64 = await fetchAsBase64(result.url);
-            await emit({ type: "result", index, image: { id: `kei-${Date.now()}-${index}`, imageBase64 } });
-          } catch (err) {
-            console.error(`[generate-rework] fetching result failed for task ${index}:`, err);
-            await emit({ type: "error", index, reason: `Image fetch failed: ${(err as Error).message}` });
-          }
-        })
-        .catch(async (err) => {
-          await emit({ type: "error", index, reason: (err as Error).message });
-        })
+  // Fire and forget — the job runs independent of this request/response, so
+  // a client that disconnects (page reload, closed tab) doesn't kill it. The
+  // client polls /api/generation-status for progress instead of holding this
+  // connection open for the full 1-2 minutes it can take.
+  void (async () => {
+    await Promise.allSettled(
+      Array.from({ length: clampedCount }, (_, index) =>
+        runOneTask(prompt, inputUrls)
+          .then(async (result) => {
+            if (!result.ok) {
+              console.warn(`[generate-rework] task ${index} failed: ${result.reason}`);
+              setSlot(sessionId, index, { status: "error", reason: result.reason, code: result.credits ? "insufficient_credits" : undefined });
+              return;
+            }
+            try {
+              const imageBase64 = await fetchAsBase64(result.url);
+              setSlot(sessionId, index, { status: "done", imageBase64 });
+            } catch (err) {
+              console.error(`[generate-rework] fetching result failed for task ${index}:`, err);
+              setSlot(sessionId, index, { status: "error", reason: `Image fetch failed: ${(err as Error).message}` });
+            }
+          })
+          .catch((err) => setSlot(sessionId, index, { status: "error", reason: (err as Error).message }))
+      )
     );
-
-    await Promise.allSettled(tasks);
-    await emit({ type: "done", sourcePhotoUrl: !isEdit ? sourceUrl : undefined });
-    await writer.close();
   })();
 
-  return new Response(readable, {
-    headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-cache" },
-  });
+  return Response.json({ ok: true, iteration, sourcePhotoUrl: !isEdit ? sourceUrl : undefined });
 }
