@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { useAppStore } from "@/store/app-store";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
-import { blobUrlToBase64 } from "@/lib/image-utils";
 import { resolveImageSrc } from "@/lib/image-src";
 
 const supabase = createSupabaseBrowserClient();
@@ -16,17 +15,26 @@ function extFromMime(mime: string): string {
   return "jpg";
 }
 
-// Uploads a local blob: URL straight from the browser to Supabase Storage and
-// returns its public URL. Used instead of sending the photo to a Node API
-// route to re-upload — this machine's Node process is unreliable talking to
-// Supabase over the network, while the browser's own network stack isn't.
-async function uploadPhotoDirect(blobUrl: string, sessionId: string): Promise<string> {
-  const blob = await (await fetch(blobUrl)).blob();
+// Uploads a Blob straight from the browser to Supabase Storage and returns
+// its public URL. Used instead of sending the file to a Node API route to
+// upload — this machine's Node process is unreliable talking to Supabase
+// over the network, while the browser's own network stack isn't.
+async function uploadBlobDirect(blob: Blob, sessionId: string, prefix: string): Promise<string> {
   const contentType = blob.type || "image/jpeg";
-  const path = `${sessionId}/rework-source/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extFromMime(contentType)}`;
+  const path = `${sessionId}/${prefix}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extFromMime(contentType)}`;
   const { error } = await supabase.storage.from("session-assets").upload(path, blob, { contentType, upsert: false });
-  if (error) throw new Error(`Photo upload failed: ${error.message}`);
+  if (error) throw new Error(`Upload failed: ${error.message}`);
   return supabase.storage.from("session-assets").getPublicUrl(path).data.publicUrl;
+}
+
+async function uploadPhotoDirect(blobUrl: string, sessionId: string, prefix: string): Promise<string> {
+  const blob = await (await fetch(blobUrl)).blob();
+  return uploadBlobDirect(blob, sessionId, prefix);
+}
+
+async function uploadBase64Direct(dataUrl: string, sessionId: string, prefix: string): Promise<string> {
+  const blob = await (await fetch(dataUrl)).blob();
+  return uploadBlobDirect(blob, sessionId, prefix);
 }
 
 interface DesignRow {
@@ -198,7 +206,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
         };
         if (isFirst) {
           body.description = sessionDescription;
-          if (reworkPhoto) body.sourcePhotoUrl = await uploadPhotoDirect(reworkPhoto, sessionId);
+          if (reworkPhoto) body.sourcePhotoUrl = await uploadPhotoDirect(reworkPhoto, sessionId, "rework-source");
         } else {
           body.editInstruction = instructionForTurn;
           body.editSourceUrls = editSourceUrls;
@@ -209,10 +217,14 @@ function ChatInner({ sessionId }: { sessionId: string }) {
       } else {
         const localRefs = referenceImages.filter((r) => r.startsWith("blob:") || r.startsWith("data:"));
         const hostedRefs = referenceImages.filter((r) => !r.startsWith("blob:") && !r.startsWith("data:"));
-        const images = isFirst ? await Promise.all(localRefs.map(blobUrlToBase64)) : [];
+        // Upload local refs straight from the browser instead of sending base64
+        // to the server to upload — same reliability fix as the rework photo.
+        const uploadedRefs = isFirst
+          ? await Promise.all(localRefs.map((r) => uploadPhotoDirect(r, sessionId, "refs")))
+          : [];
         const body: Record<string, unknown> = {
           sessionId, description: sessionDescription, style: sessionStyle,
-          images, referenceImageUrls: isFirst ? hostedRefs : [],
+          images: [], referenceImageUrls: isFirst ? [...uploadedRefs, ...hostedRefs] : [],
           isTextTattoo, colors: selectedColors, targetBodyArea, count: thisCount,
           ...(isTextTattoo && textTattooFont ? { textTattooFont } : {}),
         };
@@ -245,27 +257,34 @@ function ChatInner({ sessionId }: { sessionId: string }) {
 
         for (const line of lines) {
           if (!line.trim()) continue;
-          let event: { type: string; image?: { id: string; imageUrl: string }; reason?: string; code?: string; sourcePhotoUrl?: string };
+          let event: { type: string; image?: { id: string; imageBase64: string }; reason?: string; code?: string; sourcePhotoUrl?: string };
           try { event = JSON.parse(line); } catch { continue; }
 
           if (event.type === "result" && event.image) {
             const i = slotIndex++;
-            const [persisted] = await persistDesigns(
-              [{ id: event.image.id, imageUrl: event.image.imageUrl, gradient: "", patternType: "mandala", styleName: `Variation ${i + 1}` }],
-              { parentDesignIds: isFirst ? [] : editSourceIds, userInstruction: instructionForTurn }
-            );
-            const row: DesignRow = {
-              id: persisted.dbId ?? persisted.id,
-              image_url: persisted.imageUrl!,
-              style_name: persisted.styleName,
-              iteration: nextIteration,
-              is_finalized: false,
-              user_instruction: instructionForTurn ?? null,
-              parent_design_ids: isFirst ? [] : editSourceIds,
-              created_at: new Date().toISOString(),
-            };
-            setBatches((prev) => prev.map((b) => (b.iteration === nextIteration ? { ...b, images: [...b.images, row] } : b)));
-            setPendingCount((c) => Math.max(0, c - 1));
+            try {
+              const prefix = sessionFlowType === "rework" ? "rework" : "designs";
+              const imageUrl = await uploadBase64Direct(event.image.imageBase64, sessionId, prefix);
+              const [persisted] = await persistDesigns(
+                [{ id: event.image.id, imageUrl, gradient: "", patternType: "mandala", styleName: `Variation ${i + 1}` }],
+                { parentDesignIds: isFirst ? [] : editSourceIds, userInstruction: instructionForTurn }
+              );
+              const row: DesignRow = {
+                id: persisted.dbId ?? persisted.id,
+                image_url: persisted.imageUrl!,
+                style_name: persisted.styleName,
+                iteration: nextIteration,
+                is_finalized: false,
+                user_instruction: instructionForTurn ?? null,
+                parent_design_ids: isFirst ? [] : editSourceIds,
+                created_at: new Date().toISOString(),
+              };
+              setBatches((prev) => prev.map((b) => (b.iteration === nextIteration ? { ...b, images: [...b.images, row] } : b)));
+            } catch (err) {
+              setError((err as Error).message);
+            } finally {
+              setPendingCount((c) => Math.max(0, c - 1));
+            }
           } else if (event.type === "error") {
             setPendingCount((c) => Math.max(0, c - 1));
             if (event.code === "insufficient_credits") {

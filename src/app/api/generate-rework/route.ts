@@ -1,7 +1,18 @@
 import { NextRequest } from "next/server";
 import { createKeiTask, waitForKeiTask, KeiTaskFailedError, KeiCreditsError } from "@/lib/kei-api";
 import { buildReworkPrompt } from "@/lib/prompts-rework";
-import { uploadBase64, uploadFromUrl } from "@/lib/storage";
+import { uploadBase64 } from "@/lib/storage";
+
+// Fetching from KEI works reliably from this server (unlike uploading TO
+// Supabase, which doesn't) — so download the result here but hand the bytes
+// to the browser as base64 and let IT do the unreliable-from-Node upload.
+async function fetchAsBase64(url: string): Promise<string> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Fetch failed (${res.status}) for ${url}`);
+  const contentType = res.headers.get("content-type") ?? "image/png";
+  const buffer = Buffer.from(await res.arrayBuffer());
+  return `data:${contentType};base64,${buffer.toString("base64")}`;
+}
 
 type RunResult =
   | { ok: true; url: string }
@@ -90,11 +101,11 @@ export async function POST(req: NextRequest) {
             return;
           }
           try {
-            const url = await uploadFromUrl(result.url, sessionId, "rework");
-            await emit({ type: "result", index, image: { id: `kei-${Date.now()}-${index}`, imageUrl: url } });
+            const imageBase64 = await fetchAsBase64(result.url);
+            await emit({ type: "result", index, image: { id: `kei-${Date.now()}-${index}`, imageBase64 } });
           } catch (err) {
-            console.error(`[generate-rework] storage upload failed for task ${index}:`, err);
-            await emit({ type: "error", index, reason: `Image upload failed: ${(err as Error).message}` });
+            console.error(`[generate-rework] fetching result failed for task ${index}:`, err);
+            await emit({ type: "error", index, reason: `Image fetch failed: ${(err as Error).message}` });
           }
         })
         .catch(async (err) => {
