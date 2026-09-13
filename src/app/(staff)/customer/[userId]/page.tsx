@@ -55,6 +55,9 @@ interface CompletedSession {
   completed_at: string;
   design: { image_url: string; style_name: string | null } | null;
   placement: { placement_text: string | null; final_composite_url: string | null } | null;
+  // Rework only — the original photo of the existing tattoo, from the first
+  // chat turn (there's no dedicated column for it, see SessionOverview).
+  sourcePhoto: string | null;
 }
 
 type HistoryFilter = "all" | "ai_design" | "rework";
@@ -67,11 +70,55 @@ interface ActiveSession {
   hasDesign: boolean;
 }
 
+function CustomerDetailSkeleton() {
+  return (
+    <div className="min-h-[100dvh] bg-bg flex flex-col">
+      <header className="px-4 sm:px-6 pt-6 sm:pt-8 pb-4 sm:pb-6 border-b border-cleo-border flex items-center justify-between gap-3">
+        <div className="skeleton h-3 w-14 rounded" />
+        <div className="skeleton h-3 w-24 rounded hidden sm:block" />
+        <div className="skeleton h-8 w-28 rounded-lg" />
+      </header>
+
+      <div className="flex-1 px-4 sm:px-6 py-6 sm:py-8 flex flex-col gap-6 sm:gap-8 max-w-2xl mx-auto w-full">
+        <div className="bg-surface border border-cleo-border rounded-2xl p-4 sm:p-6 flex items-center gap-3 sm:gap-5">
+          <div className="skeleton w-12 h-12 sm:w-16 sm:h-16 rounded-full flex-shrink-0" />
+          <div className="flex flex-col gap-1.5 flex-1">
+            <div className="skeleton h-4 w-32 rounded" />
+            <div className="skeleton h-3 w-24 rounded" />
+            <div className="skeleton h-2.5 w-28 rounded" />
+          </div>
+          <div className="skeleton h-8 w-10 rounded flex-shrink-0" />
+        </div>
+
+        <div className="flex flex-col gap-3">
+          <div className="skeleton h-3 w-28 rounded" />
+          <div className="flex flex-col gap-3">
+            {Array.from({ length: 2 }).map((_, i) => (
+              <div key={i} className="bg-surface border border-cleo-border rounded-2xl p-3 sm:p-4 flex gap-3 sm:gap-4">
+                <div className="flex gap-2 flex-shrink-0">
+                  <div className="skeleton w-20 h-20 sm:w-24 sm:h-24 rounded-xl" />
+                  <div className="skeleton w-20 h-20 sm:w-24 sm:h-24 rounded-xl" />
+                </div>
+                <div className="flex-1 flex flex-col gap-1.5 justify-center">
+                  <div className="skeleton h-3.5 w-28 rounded" />
+                  <div className="skeleton h-2.5 w-40 rounded" />
+                  <div className="skeleton h-2.5 w-20 rounded" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CustomerDashboardInner() {
   const { userId } = useParams<{ userId: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
   const startSessionForUser = useAppStore((s) => s.startSessionForUser);
+  const setDesignerId = useAppStore((s) => s.setDesignerId);
 
   const fromParam = searchParams.get("from");
   // backUrl/backLabel are role-validated — set in useEffect after role is confirmed
@@ -99,6 +146,11 @@ function CustomerDashboardInner() {
       const { data: staffRow } = await supabase
         .from("staff").select("role").eq("id", authUser.id).maybeSingle();
       const role = staffRow?.role as "admin" | "designer" | undefined ?? null;
+      // Whoever starts the session (admin or designer) is who handled it —
+      // designer_id is really "handled by", not designer-only. Without this,
+      // a session started by an admin here would save with no staff
+      // attached at all and show "Unassigned" in the session details.
+      setDesignerId(authUser.id);
       const defaultBack = role === "admin" ? "/studio/admin" : "/studio/designer";
       const defaultLabel = role === "admin" ? "Admin" : "Dashboard";
       const { backUrl: resolvedUrl, backLabel: resolvedLabel } =
@@ -122,12 +174,14 @@ function CustomerDashboardInner() {
           .eq("user_id", userId)
           .eq("status", "completed")
           .eq("tattoo_designs.is_finalized", true)
+          .is("deleted_at", null)
           .order("completed_at", { ascending: false }),
         supabase
           .from("sessions")
           .select("id, tattoo_style, tattoo_description, created_at, tattoo_designs(id)")
           .eq("user_id", userId)
           .eq("status", "active")
+          .is("deleted_at", null)
           .order("created_at", { ascending: false }),
       ]);
 
@@ -148,7 +202,32 @@ function CustomerDashboardInner() {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             ? s.placements.find((p: any) => p.final_composite_url) ?? s.placements[0] ?? null
             : s.placements,
+          sourcePhoto: null,
         }));
+
+        // Rework's original reference photo lives on the first chat turn, not
+        // a session column — fetch it for every rework session in one batch
+        // instead of one query per row.
+        const reworkIds = mapped.filter((s) => s.flow_type === "rework").map((s) => s.id);
+        if (reworkIds.length > 0) {
+          const { data: firstTurns } = await supabase
+            .from("chat_messages")
+            .select("session_id, image_urls, created_at")
+            .in("session_id", reworkIds)
+            .eq("role", "user")
+            .order("created_at", { ascending: true });
+
+          const sourcePhotoBySession = new Map<string, string>();
+          for (const row of firstTurns ?? []) {
+            if (!sourcePhotoBySession.has(row.session_id) && row.image_urls?.[0]) {
+              sourcePhotoBySession.set(row.session_id, row.image_urls[0]);
+            }
+          }
+          for (const s of mapped) {
+            if (s.flow_type === "rework") s.sourcePhoto = sourcePhotoBySession.get(s.id) ?? null;
+          }
+        }
+
         setSessions(mapped);
       }
 
@@ -217,14 +296,7 @@ function CustomerDashboardInner() {
   }
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-bg flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-8 h-8 border-2 border-gold border-t-transparent rounded-full animate-spin" />
-          <p className="text-muted font-mono text-sm tracking-widest">LOADING…</p>
-        </div>
-      </div>
-    );
+    return <CustomerDetailSkeleton />;
   }
 
   if (notFound) {
@@ -466,10 +538,10 @@ function CustomerDashboardInner() {
                     className="bg-surface border border-cleo-border rounded-2xl overflow-hidden text-left hover:border-gold/40 transition-colors cursor-pointer group"
                   >
                     <div className="p-3 sm:p-4 flex flex-col sm:flex-row gap-3 sm:gap-4">
-                      {/* Thumbnail(s) — rework has one finished photo, AI Design has design + on-body */}
+                      {/* Thumbnail(s) — rework shows original + result, AI Design shows design + on-body */}
                       <div className="flex gap-2 flex-shrink-0">
                         {(isRework
-                          ? [{ url: designUrl, label: "Result" }]
+                          ? [{ url: session.sourcePhoto ?? undefined, label: "Original" }, { url: designUrl, label: "Result" }]
                           : [{ url: designUrl, label: "Design" }, { url: bodyUrl, label: "On Body" }]
                         ).map(({ url, label }) => (
                           <div key={label} className="flex flex-col gap-1.5 items-center">
@@ -490,18 +562,15 @@ function CustomerDashboardInner() {
                       {/* Info */}
                       <div className="flex-1 flex flex-col justify-between min-w-0 gap-2">
                         <div className="flex flex-col gap-1.5">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="flex items-center gap-1.5 min-w-0">
-                              <span className="font-cinzel text-xs font-bold tracking-[0.15em] text-gold uppercase truncate">
-                                {session.tattoo_style ?? session.design?.style_name ?? "Custom Design"}
-                              </span>
-                              {isRework && (
-                                <span className="text-[9px] font-mono uppercase tracking-wider bg-gold/10 text-gold border border-gold/30 px-1.5 py-0.5 rounded-full flex-shrink-0">
-                                  Rework
-                                </span>
-                              )}
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="font-cinzel text-xs font-bold tracking-[0.15em] text-gold uppercase truncate">
+                              {session.tattoo_style ?? session.design?.style_name ?? "Custom Design"}
                             </span>
-                            <span className="text-muted/50 text-[10px] font-mono flex-shrink-0">#{session.id}</span>
+                            {isRework && (
+                              <span className="text-[9px] font-mono uppercase tracking-wider bg-gold/10 text-gold border border-gold/30 px-1.5 py-0.5 rounded-full flex-shrink-0">
+                                Rework
+                              </span>
+                            )}
                           </div>
                           {session.tattoo_description && (
                             <p className="text-ink text-sm leading-snug line-clamp-2">{session.tattoo_description}</p>

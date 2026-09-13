@@ -48,6 +48,23 @@ async function withStats(
   }));
 }
 
+function CustomerRowSkeleton() {
+  return (
+    <div className="bg-surface border border-cleo-border rounded-xl px-4 py-3.5 flex items-center gap-4">
+      <div className="skeleton w-10 h-10 rounded-full flex-shrink-0" />
+      <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+        <div className="skeleton h-3.5 w-28 rounded" />
+        <div className="skeleton h-2.5 w-24 rounded" />
+      </div>
+      <div className="hidden sm:flex flex-col items-end gap-1.5 flex-shrink-0">
+        <div className="skeleton h-3.5 w-16 rounded" />
+        <div className="skeleton h-2.5 w-24 rounded" />
+      </div>
+      <div className="skeleton w-4 h-4 rounded flex-shrink-0" />
+    </div>
+  );
+}
+
 export default function CustomersPage() {
   const router = useRouter();
   const supabase = createSupabaseBrowserClient();
@@ -173,14 +190,12 @@ export default function CustomersPage() {
 
       {/* List */}
       {loading ? (
-        <div className="flex items-center gap-3 py-10 justify-center">
-          <div className="w-6 h-6 border-2 border-gold border-t-transparent rounded-full animate-spin" />
-          <span className="text-muted text-sm font-mono">Loading customers…</span>
+        <div className="flex flex-col gap-2">
+          {Array.from({ length: 6 }).map((_, i) => <CustomerRowSkeleton key={i} />)}
         </div>
       ) : searching ? (
-        <div className="flex items-center gap-3 py-10 justify-center">
-          <div className="w-6 h-6 border-2 border-gold border-t-transparent rounded-full animate-spin" />
-          <span className="text-muted text-sm font-mono">Searching…</span>
+        <div className="flex flex-col gap-2">
+          {Array.from({ length: 3 }).map((_, i) => <CustomerRowSkeleton key={i} />)}
         </div>
       ) : displayed.length === 0 ? (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}

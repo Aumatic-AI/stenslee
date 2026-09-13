@@ -32,6 +32,55 @@ function TattooThumb({ url }: { url: string }) {
   return <img src={url} alt="Design" className="w-full h-full object-cover" onError={() => setErr(true)} />;
 }
 
+function DesignerDetailSkeleton() {
+  return (
+    <div className="flex-1 flex flex-col">
+      <header className="px-4 sm:px-6 pt-5 pb-4 border-b border-cleo-border flex items-center gap-3">
+        <div className="skeleton h-3 w-20 rounded" />
+      </header>
+      <div className="flex-1 px-4 sm:px-6 py-6 sm:py-8 max-w-4xl mx-auto w-full flex flex-col gap-7">
+        <div className="bg-surface border border-cleo-border rounded-2xl p-5 sm:p-6 flex items-center gap-5">
+          <div className="skeleton w-14 h-14 rounded-full flex-shrink-0" />
+          <div className="flex-1 flex flex-col gap-1.5">
+            <div className="skeleton h-4 w-36 rounded" />
+            <div className="skeleton h-3 w-44 rounded" />
+            <div className="skeleton h-2.5 w-40 rounded" />
+          </div>
+          <div className="flex flex-col items-end gap-2 flex-shrink-0">
+            <div className="skeleton h-7 w-10 rounded" />
+            <div className="skeleton h-6 w-32 rounded-lg" />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="bg-surface border border-cleo-border rounded-xl p-4 flex flex-col items-center gap-2">
+              <div className="skeleton h-6 w-8 rounded" />
+              <div className="skeleton h-2.5 w-16 rounded" />
+            </div>
+          ))}
+        </div>
+
+        <div className="flex flex-col gap-4">
+          <div className="skeleton h-3 w-24 rounded" />
+          <div className="flex flex-col gap-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="bg-surface border border-cleo-border rounded-2xl p-4 flex gap-4">
+                <div className="skeleton w-20 h-20 sm:w-24 sm:h-24 rounded-xl flex-shrink-0" />
+                <div className="flex-1 flex flex-col justify-center gap-1.5">
+                  <div className="skeleton h-3.5 w-28 rounded" />
+                  <div className="skeleton h-2.5 w-40 rounded" />
+                  <div className="skeleton h-2.5 w-20 rounded" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function DesignerDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
@@ -234,6 +283,7 @@ export default function DesignerDetailPage({ params }: { params: Promise<{ id: s
             tattoo_designs(image_url, style_name, is_finalized)
           `)
           .eq("designer_id", id)
+          .is("deleted_at", null)
           .order("created_at", { ascending: false }),
       ]);
 
@@ -250,11 +300,7 @@ export default function DesignerDetailPage({ params }: { params: Promise<{ id: s
     s === "completed" ? "text-success" : s === "abandoned" ? "text-error" : "text-gold";
 
   if (loading) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-gold border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
+    return <DesignerDetailSkeleton />;
   }
 
   if (notFound) {

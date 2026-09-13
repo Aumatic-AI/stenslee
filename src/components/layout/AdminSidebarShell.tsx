@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, cloneElement } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { motion } from "framer-motion";
 import { usePathname, useRouter } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 
@@ -33,9 +34,11 @@ const NAV_ITEMS = [
   {
     href: "/studio/admin/designers",
     label: "Designers",
+    // Paintbrush — reads as "the creative staff" on its own, unlike the
+    // generic people icon already used for Customers.
     icon: (
       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h10a2 2 0 002-2v-4a2 2 0 00-2-2h-2.5M7 9h2m-2 4h2" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9.53 16.122a3 3 0 00-5.78 1.128 2.25 2.25 0 01-2.4 2.245 4.49 4.49 0 003.498 1.307 4.491 4.491 0 001.307-3.497c0-.398-.077-.778-.22-1.128Zm0 0a15.998 15.998 0 003.388-1.62m-5.043-.025a15.994 15.994 0 011.622-3.395m3.42 3.42a15.995 15.995 0 004.764-4.648l3.876-5.814a1.151 1.151 0 00-1.597-1.597L14.146 6.32a15.996 15.996 0 00-4.649 4.763m3.42 3.42a6.776 6.776 0 00-3.42-3.42" />
       </svg>
     ),
   },
@@ -73,7 +76,10 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createSupabaseBrowserClient();
-  const [admin, setAdmin] = useState<AdminIdentity | null>(null);
+  // undefined = role check still in flight (fresh app load); null = confirmed
+  // non-admin/no session. Kept distinct so the splash below only ever shows
+  // once, on the very first load — not on every in-app navigation.
+  const [admin, setAdmin] = useState<AdminIdentity | null | undefined>(undefined);
 
   useEffect(() => {
     if (pathname === "/studio/login") return;
@@ -92,11 +98,96 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
       if (!cancelled) setAdmin(staff && staff.role === "admin" && staff.is_active ? staff : null);
     }
     check();
-    return () => { cancelled = true; };
+
+    // Re-validate on any real auth change (sign-in, sign-out, token refresh)
+    // — a one-time mount check alone goes stale the moment a different
+    // account signs in in the same tab (e.g. admin logs out, a designer logs
+    // in): the shell would otherwise keep showing the previous session's
+    // sidebar since this effect never re-runs on its own.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      check();
+    });
+
+    return () => { cancelled = true; subscription.unsubscribe(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (pathname === "/studio/login" || !admin) {
+  if (pathname === "/studio/login") {
+    return <>{children}</>;
+  }
+
+  // Brief branded splash while the very first role check is in flight — this
+  // shell lives in the root layout and mounts once per hard page load, so
+  // this only ever appears on a fresh app load, never on in-app navigation.
+  // Same markup as the root "/" splash (src/app/page.tsx) — that one only
+  // ever showed for visits to "/" itself, never for a deep link straight
+  // into e.g. /studio/admin/sessions/xyz, which is what this covers.
+  if (admin === undefined) {
+    return (
+      <main className="min-h-[100dvh] bg-bg flex flex-col items-center justify-center px-5 relative overflow-hidden">
+        <div
+          className="absolute inset-0 opacity-[0.025]"
+          style={{
+            backgroundImage:
+              "repeating-linear-gradient(0deg,#c9a84c 0px,#c9a84c 1px,transparent 1px,transparent 60px),repeating-linear-gradient(90deg,#c9a84c 0px,#c9a84c 1px,transparent 1px,transparent 60px)",
+          }}
+        />
+        {[
+          "top-6 left-6 border-t-2 border-l-2 rounded-tl",
+          "top-6 right-6 border-t-2 border-r-2 rounded-tr",
+          "bottom-6 left-6 border-b-2 border-l-2 rounded-bl",
+          "bottom-6 right-6 border-b-2 border-r-2 rounded-br",
+        ].map((cls) => (
+          <div key={cls} className={`absolute w-10 h-10 border-gold/20 ${cls}`} />
+        ))}
+
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+          className="flex flex-col items-center gap-6 z-10"
+        >
+          <div className="w-40 h-40 sm:w-56 sm:h-56 relative drop-shadow-2xl">
+            <Image
+              src="/cleopatra-logo.svg"
+              alt="Cleopatra Ink Studio"
+              fill
+              className="object-contain"
+              priority
+            />
+          </div>
+
+          <div className="text-center flex flex-col gap-1">
+            <h1 className="font-cinzel text-4xl sm:text-5xl font-black tracking-[0.12em] text-ink uppercase leading-none">
+              Cleopatra
+            </h1>
+            <h2 className="font-cinzel text-xl sm:text-2xl font-bold tracking-[0.22em] text-gold uppercase">
+              Ink Studio
+            </h2>
+            <div className="flex items-center gap-3 my-2">
+              <div className="flex-1 h-px bg-gradient-to-r from-transparent to-gold/40" />
+              <div className="w-1 h-1 rounded-full bg-gold rotate-45" />
+              <div className="flex-1 h-px bg-gradient-to-l from-transparent to-gold/40" />
+            </div>
+            <p className="text-muted text-xs tracking-[0.18em] uppercase font-cinzel">
+              AI-Powered Tattoo Design
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 mt-2">
+            <div className="w-4 h-4 border-2 border-gold/40 border-t-gold rounded-full animate-spin" />
+            <span className="text-muted text-xs font-mono tracking-widest">Loading…</span>
+          </div>
+        </motion.div>
+
+        <p className="absolute bottom-6 text-muted text-[10px] font-mono tracking-widest z-10">
+          CLEOPATRA INK STUDIO © 2026
+        </p>
+      </main>
+    );
+  }
+
+  if (!admin) {
     return <>{children}</>;
   }
 
@@ -108,10 +199,20 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
     router.refresh();
   }
 
+  // Bottom mobile-app-style tab bar is scoped to /studio/admin/* pages only
+  // — the customer profile and session-flow pages an admin can also reach
+  // (/customer/[userId], /[sessionId]/design|placement) already have their
+  // own fixed sticky action bar at the bottom on phone widths, and a second
+  // fixed bar there would overlap it.
+  const isAdminSection = pathname.startsWith("/studio/admin");
+
   return (
-    <div className="h-[100dvh] min-h-0 bg-bg flex flex-col sm:flex-row overflow-hidden">
-      {/* Sidebar — desktop/tablet. Fixed in place; only <main> scrolls. */}
-      <aside className="hidden sm:flex sm:flex-col w-56 flex-shrink-0 min-h-0 border-r border-cleo-border bg-surface/40 px-4 py-6 gap-6 overflow-y-auto">
+    <div className="h-[100dvh] min-h-0 bg-bg flex flex-col lg:flex-row overflow-hidden">
+      {/* Sidebar — only on genuinely wide (desktop) viewports. Narrower ones
+          (phone through tablet/split-screen) get the compact top tab bar
+          below instead — a fixed 224px rail left too little room for the
+          dashboard's content at those widths. Fixed in place; only <main> scrolls. */}
+      <aside className="hidden lg:flex lg:flex-col w-56 flex-shrink-0 min-h-0 border-r border-cleo-border bg-surface/40 px-4 py-6 gap-6 overflow-y-auto">
         <div className="flex items-center gap-2.5 px-2">
           <div className="w-7 h-7 relative flex-shrink-0">
             <Image src="/cleopatra-logo.svg" alt="Cleopatra" fill className="object-contain" />
@@ -165,8 +266,8 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
         </div>
       </aside>
 
-      {/* Top tab bar — mobile */}
-      <div className="sm:hidden border-b border-cleo-border bg-surface/40 flex-shrink-0">
+      {/* Top tab bar — phone through tablet/split-screen widths */}
+      <div className="lg:hidden border-b border-cleo-border bg-surface/40 flex-shrink-0">
         <div className="flex items-center justify-between px-4 pt-4 pb-2">
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 relative flex-shrink-0">
@@ -181,7 +282,9 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
             Logout
           </button>
         </div>
-        <nav className="flex gap-1.5 px-3 pb-3 overflow-x-auto">
+        {/* On phone widths, admin-section pages use the bottom tab bar
+            instead — this strip only shows there from tablet width up. */}
+        <nav className={`${isAdminSection ? "hidden sm:flex" : "flex"} gap-1.5 px-3 pb-3 overflow-x-auto`}>
           {NAV_ITEMS.map((item) => {
             const active = isActive(pathname, item.href);
             return (
@@ -201,7 +304,26 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
       </div>
 
       {/* Page content */}
-      <main className="flex-1 min-w-0 min-h-0 flex flex-col overflow-y-auto">{children}</main>
+      <main className={`flex-1 min-w-0 min-h-0 flex flex-col overflow-y-auto ${isAdminSection ? "pb-20 sm:pb-0" : ""}`}>{children}</main>
+
+      {/* Bottom tab bar — mobile-app style, phone widths, admin section only */}
+      {isAdminSection && (
+        <nav className="sm:hidden fixed bottom-0 inset-x-0 z-30 bg-surface/95 backdrop-blur-md border-t border-cleo-border flex items-stretch pb-safe">
+          {NAV_ITEMS.map((item) => {
+            const active = isActive(pathname, item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex-1 flex flex-col items-center justify-center gap-1 py-2.5 transition-colors ${active ? "text-gold" : "text-muted"}`}
+              >
+                {cloneElement(item.icon, { className: "w-5 h-5" })}
+                <span className="text-[9px] font-cinzel font-bold uppercase tracking-wide">{item.label}</span>
+              </Link>
+            );
+          })}
+        </nav>
+      )}
     </div>
   );
 }

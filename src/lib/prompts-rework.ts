@@ -24,13 +24,19 @@ function imageReference(count: number): string {
 
 export function buildReworkPrompt(opts: ReworkOptions): string {
   const { description, mode, editInstruction, imageCount = 1 } = opts;
-  const ref = imageReference(imageCount);
 
   if (editInstruction) {
-    const subject = imageCount > 1 ? "show the existing tattoo" : "is a photo of the existing tattoo";
-    return `You are a tattoo artist. ${ref} ${subject}. ${editInstruction.trim()}`;
+    const trimmed = editInstruction.trim();
+    // No "you are a tattoo artist / this is a photo of..." framing here — on
+    // a single reference image, that framing measurably pushed the model
+    // toward redrawing the whole thing as tattoo-flash-style line art instead
+    // of making a small photo edit. The user's own side-by-side test against
+    // ChatGPT/Gemini showed the bare instruction, with nothing else added,
+    // is what gets a clean in-place edit. Only add a reference note when
+    // there's real ambiguity about which image(s) the instruction means.
+    return imageCount > 1 ? `${imageReference(imageCount)} show the existing tattoo. ${trimmed}` : trimmed;
   }
 
   const action = mode === "cover" ? "cover up" : "extend";
-  return `You are a tattoo artist. ${ref} is a photo of an existing tattoo. ${action} it: ${description.trim()}`;
+  return `You are a tattoo artist. Image 1 is a photo of an existing tattoo. ${action} it: ${description.trim()}`;
 }

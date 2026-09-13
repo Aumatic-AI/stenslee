@@ -73,6 +73,7 @@ export default function DesignerDashboard() {
         .from("sessions")
         .select("id, tattoo_style, status, created_at, users(first_name, phone)", { count: "exact" })
         .eq("designer_id", staffRow.id)
+        .is("deleted_at", null)
         .order("created_at", { ascending: false })
         .range(0, SESSIONS_PAGE_SIZE - 1);
 
@@ -92,6 +93,7 @@ export default function DesignerDashboard() {
       .from("sessions")
       .select("id, tattoo_style, status, created_at, users(first_name, phone)")
       .eq("designer_id", staff.id)
+      .is("deleted_at", null)
       .order("created_at", { ascending: false })
       .range(recentSessions.length, recentSessions.length + SESSIONS_PAGE_SIZE - 1);
 
@@ -405,9 +407,20 @@ export default function DesignerDashboard() {
           </div>
 
           {loadingRecent ? (
-            <div className="flex items-center gap-2 py-6">
-              <div className="w-4 h-4 border-2 border-gold border-t-transparent rounded-full animate-spin" />
-              <span className="text-muted text-xs font-mono">Loading…</span>
+            <div className="flex flex-col gap-2">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="bg-surface border border-cleo-border rounded-xl px-4 py-3 flex items-center gap-4">
+                  <div className="skeleton w-8 h-8 rounded-full flex-shrink-0" />
+                  <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+                    <div className="skeleton h-3.5 w-24 rounded" />
+                    <div className="skeleton h-2.5 w-32 rounded" />
+                  </div>
+                  <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                    <div className="skeleton h-2.5 w-12 rounded" />
+                    <div className="skeleton h-2.5 w-10 rounded" />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : recentSessions.length === 0 ? (
             <div className="bg-surface border border-cleo-border rounded-2xl p-8 text-center">

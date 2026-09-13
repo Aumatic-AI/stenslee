@@ -28,7 +28,19 @@ export interface Job {
 
 const JOB_TTL_MS = 15 * 60 * 1000; // stale jobs (e.g. server restarted mid-run) stop blocking new ones
 
-const jobs = new Map<string, Job>();
+// Pinned to globalThis, not a plain module-level const: in Next.js dev mode,
+// editing any file can make the dev server re-evaluate a route's module
+// graph independently of other routes. Two route files that both import this
+// module can otherwise end up with two different `jobs` Maps in memory at
+// once — a job created via /api/generate-rework becomes invisible to
+// /api/generation-status. Stashing the single instance on globalThis survives
+// that re-evaluation. (Still single-process — a multi-instance/serverless
+// deployment would need a real shared store like a DB table or Redis.)
+declare global {
+  var __cleopatraGenerationJobs: Map<string, Job> | undefined;
+}
+const jobs = globalThis.__cleopatraGenerationJobs ?? new Map<string, Job>();
+globalThis.__cleopatraGenerationJobs = jobs;
 
 export function startJob(
   sessionId: string,

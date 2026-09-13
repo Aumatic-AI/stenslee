@@ -2,8 +2,6 @@
 
 import { use } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import Image from "next/image";
-import Link from "next/link";
 import { useAppStore } from "@/store/app-store";
 
 const AI_DESIGN_STEPS = [
@@ -56,16 +54,6 @@ export default function SessionLayout({
 
         <div className="w-px h-5 bg-cleo-border flex-shrink-0" />
 
-        {/* Logo */}
-        <Link href="/" className="flex items-center gap-2.5 flex-shrink-0">
-          <div className="w-6 h-6 relative">
-            <Image src="/cleopatra-logo.svg" alt="Cleopatra" fill className="object-contain" />
-          </div>
-          <span className="hidden sm:block font-cinzel text-[11px] font-bold tracking-[0.15em] text-muted uppercase">
-            Cleopatra Ink
-          </span>
-        </Link>
-
         {/* Customer info */}
         {customerName && (
           <div className="flex items-center gap-2 bg-surface-2 border border-cleo-border rounded-lg px-3 py-1.5">
@@ -98,11 +86,6 @@ export default function SessionLayout({
             );
           })}
         </div>
-
-        {/* Session ID */}
-        <span className="hidden md:block text-[10px] font-mono text-muted/50 ml-2">
-          {sessionId}
-        </span>
       </header>
 
       <main className="flex-1">{children}</main>

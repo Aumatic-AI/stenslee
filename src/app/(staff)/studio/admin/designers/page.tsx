@@ -16,6 +16,22 @@ const DESIGNER_SELECT = "id, email, name, role, is_active, created_at, avatar_ur
 
 type ActiveFilter = "all" | "active" | "inactive";
 
+function DesignerRowSkeleton() {
+  return (
+    <div className="bg-surface border border-cleo-border rounded-xl px-4 py-3 flex items-center gap-4">
+      <div className="skeleton w-9 h-9 rounded-full flex-shrink-0" />
+      <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+        <div className="skeleton h-3.5 w-32 rounded" />
+        <div className="skeleton h-2.5 w-48 rounded" />
+      </div>
+      <div className="skeleton w-11 h-6 rounded-full flex-shrink-0" />
+      <div className="skeleton h-2.5 w-10 rounded flex-shrink-0 hidden sm:block" />
+      <div className="skeleton w-8 h-8 rounded-lg flex-shrink-0" />
+      <div className="skeleton w-8 h-8 rounded-lg flex-shrink-0" />
+    </div>
+  );
+}
+
 function DesignersPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -331,14 +347,12 @@ function DesignersPageInner() {
       </motion.div>
 
       {loading ? (
-        <div className="flex items-center gap-3 py-10 justify-center">
-          <div className="w-6 h-6 border-2 border-gold border-t-transparent rounded-full animate-spin" />
-          <span className="text-muted text-sm font-mono">Loading designers…</span>
+        <div className="flex flex-col gap-2">
+          {Array.from({ length: 6 }).map((_, i) => <DesignerRowSkeleton key={i} />)}
         </div>
       ) : searching ? (
-        <div className="flex items-center gap-3 py-10 justify-center">
-          <div className="w-6 h-6 border-2 border-gold border-t-transparent rounded-full animate-spin" />
-          <span className="text-muted text-sm font-mono">Searching…</span>
+        <div className="flex flex-col gap-2">
+          {Array.from({ length: 3 }).map((_, i) => <DesignerRowSkeleton key={i} />)}
         </div>
       ) : designers.length === 0 ? (
         <div className="bg-surface border border-cleo-border rounded-2xl p-10 text-center">

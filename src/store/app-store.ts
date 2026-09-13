@@ -73,6 +73,11 @@ interface AppState {
   isGeneratingPlacement: boolean;
   placementDbId: string | null; // placements.id of the most recent saved attempt
 
+  // The session row's actual status (from the DB, via hydrateFromSession) —
+  // lets a reloaded page tell "already finalized" from "still in progress"
+  // without relying on any local-only flag that resets on reload.
+  sessionStatus: "active" | "completed" | "abandoned";
+
   // Hydration status — set true after first hydrate attempt for current session
   hydratedSessionId: string | null;
 
@@ -148,6 +153,7 @@ const defaultState = {
   finalComposite: null,
   isGeneratingPlacement: false,
   placementDbId: null as string | null,
+  sessionStatus: "active" as "active" | "completed" | "abandoned",
   hydratedSessionId: null as string | null,
 };
 
@@ -177,6 +183,7 @@ const freshSessionDesignState = {
   finalComposite: null,
   isGeneratingPlacement: false,
   placementDbId: null,
+  sessionStatus: "active" as "active" | "completed" | "abandoned",
 };
 
 export const useAppStore = create<AppState>()(
@@ -342,7 +349,10 @@ export const useAppStore = create<AppState>()(
           session_id: sessionId,
           image_url: d.imageUrl!,
           style_name: d.styleName,
-          pattern_type: d.patternType,
+          // Rework has no pattern-type concept (it's an edit of an existing
+          // tattoo, not a style-based generation) — "mandala" is only ever a
+          // required placeholder value on the caller's side for this flow.
+          pattern_type: flowType === "rework" ? null : d.patternType,
           iteration: meta?.iteration ?? iterationCount,
           parent_design_ids: meta?.parentDesignIds ?? [],
           user_instruction: meta?.userInstruction ?? null,
@@ -390,13 +400,20 @@ export const useAppStore = create<AppState>()(
       p_design_id: designId,
       p_placement_id: placementId,
     });
-    if (!rpcError) return;
+    if (!rpcError) { set({ sessionStatus: "completed" }); return; }
 
     // RPC failed (most often: live DB still has the pre-hotfix function, so
     // a user_preferences NOT NULL violation aborts the whole transaction).
     // The critical path doesn't need the RPC — fall back to plain table ops.
     // user_preferences is analytics-only; we deliberately skip it here.
     console.warn("finalize_session RPC failed — falling back to manual sequence:", rpcError);
+
+    // Unset any previous finalized choice first — only one design/placement
+    // can be finalized at a time, but nothing is ever deleted.
+    await Promise.all([
+      supabase.from("tattoo_designs").update({ is_finalized: false }).eq("session_id", sessionId).eq("is_finalized", true),
+      supabase.from("placements").update({ is_finalized: false }).eq("session_id", sessionId).eq("is_finalized", true),
+    ]);
 
     const [designUpdate, placementUpdate] = await Promise.all([
       supabase.from("tattoo_designs").update({ is_finalized: true }).eq("id", designId),
@@ -405,17 +422,12 @@ export const useAppStore = create<AppState>()(
     if (designUpdate.error) throw new Error(`Finalize fallback: design update failed — ${designUpdate.error.message}`);
     if (placementUpdate.error) throw new Error(`Finalize fallback: placement update failed — ${placementUpdate.error.message}`);
 
-    // Prune non-finalized siblings so the dashboard sees only the chosen rows.
-    await Promise.all([
-      supabase.from("tattoo_designs").delete().eq("session_id", sessionId).eq("is_finalized", false),
-      supabase.from("placements").delete().eq("session_id", sessionId).eq("is_finalized", false),
-    ]);
-
     const { error: sessionError } = await supabase
       .from("sessions")
       .update({ status: "completed", completed_at: new Date().toISOString() })
       .eq("id", sessionId);
     if (sessionError) throw new Error(`Finalize fallback: session update failed — ${sessionError.message}`);
+    set({ sessionStatus: "completed" });
   },
 
   finalizeReworkSession: async (designId) => {
@@ -426,21 +438,24 @@ export const useAppStore = create<AppState>()(
       p_session_id: sessionId,
       p_design_id: designId,
     });
-    if (!rpcError) return;
+    if (!rpcError) { set({ sessionStatus: "completed" }); return; }
 
     console.warn("finalize_rework_session RPC failed — falling back to manual sequence:", rpcError);
+
+    // Unset any previous finalized choice first — only one design can be
+    // finalized at a time, but nothing is ever deleted.
+    await supabase.from("tattoo_designs").update({ is_finalized: false }).eq("session_id", sessionId).eq("is_finalized", true);
 
     const { error: designError } = await supabase
       .from("tattoo_designs").update({ is_finalized: true }).eq("id", designId);
     if (designError) throw new Error(`Finalize fallback: design update failed — ${designError.message}`);
-
-    await supabase.from("tattoo_designs").delete().eq("session_id", sessionId).eq("is_finalized", false);
 
     const { error: sessionError } = await supabase
       .from("sessions")
       .update({ status: "completed", completed_at: new Date().toISOString() })
       .eq("id", sessionId);
     if (sessionError) throw new Error(`Finalize fallback: session update failed — ${sessionError.message}`);
+    set({ sessionStatus: "completed" });
   },
 
   hydrateFromSession: async (sessionId) => {
@@ -538,6 +553,7 @@ export const useAppStore = create<AppState>()(
       placementText: activePlacement?.placement_text ?? "",
       finalComposite: activePlacement?.final_composite_url ?? null,
       placementDbId: activePlacement?.id ?? null,
+      sessionStatus: (session.status as "active" | "completed" | "abandoned") ?? "active",
       hydratedSessionId: sessionId,
     });
   },
@@ -569,6 +585,7 @@ export const useAppStore = create<AppState>()(
         placementText: state.placementText,
         finalComposite: state.finalComposite,
         placementDbId: state.placementDbId,
+        sessionStatus: state.sessionStatus,
         hydratedSessionId: state.hydratedSessionId,
       }),
       version: 1,

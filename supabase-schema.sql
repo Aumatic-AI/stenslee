@@ -55,7 +55,9 @@ comment on table users is 'Customer accounts. Identified by phone number. No aut
 -- ── 3. SESSIONS ─────────────────────────────────────────────
 -- One session = one tattoo design journey.
 -- designer_id tracks which staff member handled it.
--- Active sessions older than 3hr are auto-deleted by the cleanup cron.
+-- Nothing is ever hard-deleted — finalize keeps every generated variation,
+-- and "deleting" a session from the UI only sets deleted_at (same soft-delete
+-- idiom as staff.deleted_at above): hidden from staff lists, data kept.
 create table sessions (
   id                     text        primary key,
   user_id                uuid        references users(id) on delete set null,
@@ -70,7 +72,8 @@ create table sessions (
   status                 text        not null default 'active'
                            check (status in ('active', 'completed', 'abandoned')),
   created_at             timestamptz not null default now(),
-  completed_at           timestamptz
+  completed_at           timestamptz,
+  deleted_at             timestamptz
 );
 
 create index on sessions(user_id);
@@ -78,7 +81,7 @@ create index on sessions(designer_id);
 create index on sessions(status);
 create index on sessions(created_at);
 
-comment on table sessions is 'One row per tattoo design session. Active sessions auto-expire after 3hr via /api/cron/cleanup.';
+comment on table sessions is 'One row per tattoo design session. Nothing is ever auto-deleted; deleted_at is a soft-delete marker that only hides a session from staff lists.';
 
 -- ── 4. TATTOO DESIGNS ───────────────────────────────────────
 -- All generated variants stored. Non-finalized rows pruned on session completion.
@@ -95,13 +98,17 @@ create table tattoo_designs (
   -- for an original batch — its "message" is the session's own description).
   parent_design_ids uuid[]      not null default '{}',
   user_instruction  text,
+  -- Flash/sticker version — the tattoo isolated onto a plain white
+  -- background, no skin/body. Generated once a design is finalized, cached
+  -- here so re-opening the session later doesn't regenerate it again.
+  flash_image_url   text,
   created_at        timestamptz not null default now()
 );
 
 create index on tattoo_designs(session_id);
 create index on tattoo_designs(session_id, is_finalized);
 
-comment on table tattoo_designs is 'Generated tattoo variants. is_finalized=true = customer approved. All others pruned on finalize_session().';
+comment on table tattoo_designs is 'Generated tattoo variants. is_finalized=true = customer approved; only one row per session can be true at a time. Every variation is kept — nothing is pruned on finalize.';
 
 -- ── 4b. CHAT MESSAGES ────────────────────────────────────────
 -- The chat screen's source of truth for what to render — one row per turn.
@@ -139,7 +146,7 @@ create table placements (
 
 create index on placements(session_id);
 
-comment on table placements is 'Body placement attempts per session. Supports going back and re-generating. Only the finalized row is kept at completion.';
+comment on table placements is 'Body placement attempts per session. Supports going back and re-generating. Every attempt is kept — nothing is pruned on finalize.';
 
 -- ── 6. USER PREFERENCES ─────────────────────────────────────
 -- Aggregated from completed sessions via finalize_session() analytics path.
@@ -191,7 +198,9 @@ $$;
 
 -- ── FUNCTION: finalize_session ───────────────────────────────
 -- Called from the app when the customer approves their final design + placement.
--- Critical path: marks finalized rows, prunes non-finalized siblings, completes session.
+-- Critical path: unfinalizes any previous choice, marks the new one finalized,
+-- completes session. Nothing is ever deleted — every generated variation is
+-- kept so staff can come back later and finalize a different one instead.
 -- Analytics path: upserts user_preferences — wrapped in EXCEPTION so it never
 --   aborts the critical path.
 create or replace function finalize_session(
@@ -205,11 +214,12 @@ declare
   v_style     text;
   v_placement text;
 begin
-  -- Critical path
-  update tattoo_designs set is_finalized = true where id = p_design_id;
-  update placements      set is_finalized = true where id = p_placement_id;
-  delete from tattoo_designs where session_id = p_session_id and is_finalized = false;
-  delete from placements      where session_id = p_session_id and is_finalized = false;
+  -- Critical path — unset any previous finalized choice before setting the
+  -- new one, since only one design/placement can be finalized at a time.
+  update tattoo_designs set is_finalized = false where session_id = p_session_id and is_finalized = true;
+  update tattoo_designs set is_finalized = true  where id = p_design_id;
+  update placements      set is_finalized = false where session_id = p_session_id and is_finalized = true;
+  update placements      set is_finalized = true  where id = p_placement_id;
   update sessions set status = 'completed', completed_at = now() where id = p_session_id;
 
   -- Analytics path — isolated, never aborts the critical path
@@ -252,15 +262,17 @@ $$;
 -- ── FUNCTION: finalize_rework_session ────────────────────────
 -- Rework (cover-up/extend) sessions never create a placements row — the
 -- generated image is already a finished on-skin photo. Same critical-path
--- shape as finalize_session, minus the placement half.
+-- shape as finalize_session, minus the placement half: unfinalize any
+-- previous choice, finalize the new one, nothing is ever deleted — staff
+-- can come back and finalize a different variation later.
 create or replace function finalize_rework_session(
   p_session_id text,
   p_design_id  uuid
 )
 returns void language plpgsql security definer as $$
 begin
-  update tattoo_designs set is_finalized = true where id = p_design_id;
-  delete from tattoo_designs where session_id = p_session_id and is_finalized = false;
+  update tattoo_designs set is_finalized = false where session_id = p_session_id and is_finalized = true;
+  update tattoo_designs set is_finalized = true  where id = p_design_id;
   update sessions set status = 'completed', completed_at = now() where id = p_session_id;
 end;
 $$;
@@ -358,26 +370,10 @@ select id, email, 'Studio Admin', 'admin', true
  where email = 'admin@yourstudio.com'           -- ← MATCH YOUR EMAIL
 on conflict (id) do nothing;
 
--- ── SESSION CLEANUP CRON ─────────────────────────────────────
--- Run AFTER deploying the app and enabling pg_cron + pg_net extensions
--- in Supabase Dashboard → Database → Extensions.
---
--- Replace YOUR_APP_URL and YOUR_CRON_SECRET before running.
---
--- select cron.schedule(
---   'cleanup-expired-sessions',
---   '*/30 * * * *',
---   $$
---   select net.http_get(
---     url     := 'YOUR_APP_URL/api/cron/cleanup',
---     headers := '{"Authorization": "Bearer YOUR_CRON_SECRET"}'::jsonb
---   );
---   $$
--- );
---
--- Verify: select jobid, jobname, schedule, active from cron.job;
--- Monitor: select * from cron.job_run_details order by start_time desc limit 20;
--- Remove:  select cron.unschedule('cleanup-expired-sessions');
+-- No session cleanup cron — nothing is ever auto-deleted. Sessions are only
+-- ever hidden from staff lists via sessions.deleted_at (soft delete); all
+-- data is kept permanently. If a cleanup-expired-sessions pg_cron job was
+-- scheduled previously, remove it: select cron.unschedule('cleanup-expired-sessions');
 
 -- ── AGGREGATE VIEWS (performance) ────────────────────────────
 -- Let the admin panel ask Postgres for pre-counted totals instead of

@@ -1,14 +1,14 @@
 "use client";
 
-import { use, useState, useEffect } from "react";
+import { use, useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { useDropzone } from "react-dropzone";
 import { useAppStore } from "@/store/app-store";
 import CameraCapture from "@/components/camera/CameraCapture";
 import TattooPlacementEditor from "@/components/placement/TattooPlacementEditor";
-import { blobUrlToBase64 } from "@/lib/image-utils";
+import { uploadPhotoDirect, uploadBase64Direct } from "@/lib/browser-upload";
+import { resolveImageSrc } from "@/lib/image-src";
 
 // Shown when the AI image service rejects the request for exhausted credits.
 // Direct copy so studio staff immediately know the fix is to top up the AI
@@ -31,6 +31,58 @@ const QUICK_PLACEMENTS = [
   "Behind the ear",
 ];
 
+const PLACEMENT_POLL_INTERVAL_MS = 4000;
+const MAX_NOT_FOUND_ATTEMPTS = 3; // grace period for a job that was *just* started
+
+type PlacementJobOutcome = { imageBase64: string } | { error: string; code?: string };
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Polls the fire-and-forget placement job to completion instead of holding
+// one HTTP request open for the 1-3 minutes generation can take — that also
+// means a page reload doesn't lose an in-progress preview, since the job
+// lives on the server, not in this component.
+async function watchPlacementJob(sessionId: string): Promise<PlacementJobOutcome> {
+  const jobKey = `placement:${sessionId}`;
+  let notFoundStreak = 0;
+
+  while (true) {
+    let status: { found: boolean; done?: boolean; slots?: Array<{ status: string; imageBase64?: string; reason?: string; code?: string }> };
+    try {
+      const res = await fetch(`/api/generation-status?sessionId=${encodeURIComponent(jobKey)}`);
+      status = await res.json();
+    } catch {
+      await sleep(PLACEMENT_POLL_INTERVAL_MS);
+      continue;
+    }
+
+    if (!status.found) {
+      notFoundStreak++;
+      if (notFoundStreak >= MAX_NOT_FOUND_ATTEMPTS) {
+        return { error: "Generation failed unexpectedly on the server." };
+      }
+      await sleep(PLACEMENT_POLL_INTERVAL_MS);
+      continue;
+    }
+    notFoundStreak = 0;
+
+    const slot = status.slots?.[0];
+    if (!slot || slot.status === "pending") {
+      await sleep(PLACEMENT_POLL_INTERVAL_MS);
+      continue;
+    }
+    if (slot.status === "error") {
+      return { error: slot.reason ?? "Placement generation failed", code: slot.code };
+    }
+    if (!slot.imageBase64) {
+      return { error: "This image failed to generate." };
+    }
+    return { imageBase64: slot.imageBase64 };
+  }
+}
+
 export default function PlacementPage({ params }: { params: Promise<{ sessionId: string }> }) {
   const { sessionId } = use(params);
   const router = useRouter();
@@ -52,6 +104,7 @@ export default function PlacementPage({ params }: { params: Promise<{ sessionId:
     hydrateFromSession,
     placementDbId,
     setPlacementDbId,
+    sessionStatus,
   } = useAppStore();
 
   const [hydrating, setHydrating] = useState(false);
@@ -68,6 +121,7 @@ export default function PlacementPage({ params }: { params: Promise<{ sessionId:
   const [finalizing, setFinalizing] = useState(false);
   // Seconds elapsed since the current generation started; drives the loading UI.
   const [elapsed, setElapsed] = useState(0);
+  const loadingRef = useRef<HTMLDivElement>(null);
 
   // Tick the elapsed counter while a generation is in flight.
   useEffect(() => {
@@ -78,6 +132,15 @@ export default function PlacementPage({ params }: { params: Promise<{ sessionId:
     const start = Date.now();
     const id = setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 1000);
     return () => clearInterval(id);
+  }, [isGeneratingPlacement]);
+
+  // Bring the loading panel into view as soon as generation starts — it sits
+  // below the fold on most screens, so without this the button just looks
+  // stuck with no visible feedback until the user scrolls manually.
+  useEffect(() => {
+    if (isGeneratingPlacement) {
+      setTimeout(() => loadingRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
+    }
   }, [isGeneratingPlacement]);
 
   // KEI typically takes 90-180s for the composite step. Cycle status text so
@@ -101,8 +164,40 @@ export default function PlacementPage({ params }: { params: Promise<{ sessionId:
     (async () => {
       await hydrateFromSession(sessionId);
       if (!cancelled) setHydrating(true);
+
+      // Resume a placement generation that was still running when this page
+      // reloaded — the job lives on the server, not in this component, so a
+      // reload no longer loses it.
+      let status: { found: boolean; done?: boolean } = { found: false };
+      try {
+        const res = await fetch(`/api/generation-status?sessionId=${encodeURIComponent(`placement:${sessionId}`)}`);
+        status = await res.json();
+      } catch {
+        // Best-effort — not fatal if we can't check.
+      }
+      if (!cancelled && status.found && !status.done) {
+        generatePlacement();
+        const outcome = await watchPlacementJob(sessionId);
+        if (cancelled) return;
+        if ("imageBase64" in outcome) {
+          try {
+            const resultUrl = await uploadBase64Direct(outcome.imageBase64, sessionId, "previews");
+            finishPlacement(resultUrl);
+            const id = await persistPlacement({ compositeUrl: resultUrl });
+            setPlacementDbId(id);
+          } catch (err) {
+            setError((err as Error).message);
+            finishPlacement("");
+          }
+        } else {
+          if (outcome.code === "insufficient_credits") setCreditsError(true);
+          setError(outcome.error);
+          finishPlacement("");
+        }
+      }
     })();
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, hydrateFromSession]);
 
   useEffect(() => {
@@ -139,18 +234,21 @@ export default function PlacementPage({ params }: { params: Promise<{ sessionId:
       const tattooImageUrl = selectedDesign.imageUrl;
       if (!tattooImageUrl) throw new Error("No tattoo image available — please go back and regenerate.");
 
-      let bodyImageB64: string | null = null;
-      let compositeImageB64: string | null = null;
+      // Uploading TO Supabase from the server is unreliable on this machine —
+      // upload straight from the browser and send the server only hosted
+      // URLs, same fix already applied everywhere else in the app.
+      let bodyPhotoUrl: string | undefined;
+      let compositeUrl: string | undefined;
 
       if (isPhotoMode && placementComposite) {
         // Send the composite (positioned overlay) for exact placement reference
-        compositeImageB64 = placementComposite.replace(/^data:image\/\w+;base64,/, "");
+        compositeUrl = await uploadBase64Direct(placementComposite, sessionId, "composites");
         // Also send the body photo so the AI has 3 images: composite + design + skin
         if (bodyPhoto) {
-          bodyImageB64 = await blobUrlToBase64(bodyPhoto);
+          bodyPhotoUrl = await uploadPhotoDirect(bodyPhoto, sessionId, "body");
         }
       } else if (isPhotoMode && bodyPhoto) {
-        bodyImageB64 = await blobUrlToBase64(bodyPhoto);
+        bodyPhotoUrl = await uploadPhotoDirect(bodyPhoto, sessionId, "body");
       }
 
       const res = await fetch("/api/placement", {
@@ -159,30 +257,32 @@ export default function PlacementPage({ params }: { params: Promise<{ sessionId:
         body: JSON.stringify({
           sessionId,
           tattooImageUrl,
-          bodyImageB64,
-          compositeImageB64,
+          bodyPhotoUrl,
+          compositeUrl,
           placementText: inputMode === "text" ? placementText : "",
         }),
       });
 
-      const json = await res.json();
-      if (!res.ok) {
-        if (json.code === "insufficient_credits") {
+      const startJson = await res.json();
+      if (!res.ok) throw new Error(startJson.error ?? "Placement generation failed to start");
+
+      const outcome = await watchPlacementJob(sessionId);
+      if ("error" in outcome) {
+        if (outcome.code === "insufficient_credits") {
           setCreditsError(true);
           throw new Error(SERVICE_UNAVAILABLE_MSG);
         }
-        throw new Error(json.error ?? "Placement generation failed");
+        throw new Error(outcome.error);
       }
 
-      const compositeUrl = json.imageUrl as string;
-      const bodyPhotoUrl = (json.bodyPhotoUrl as string | null) ?? undefined;
-      finishPlacement(compositeUrl);
+      const resultUrl = await uploadBase64Direct(outcome.imageBase64, sessionId, "previews");
+      finishPlacement(resultUrl);
 
-      // Persist this placement attempt — finalize_session will prune non-finalized rows
+      // Persist this placement attempt
       const id = await persistPlacement({
         placementText: inputMode === "text" ? placementText : undefined,
-        bodyPhotoUrl,
-        compositeUrl,
+        bodyPhotoUrl: bodyPhotoUrl ?? compositeUrl,
+        compositeUrl: resultUrl,
       });
       setPlacementDbId(id);
     } catch (err) {
@@ -260,12 +360,11 @@ export default function PlacementPage({ params }: { params: Promise<{ sessionId:
                 style={{ background: selectedDesign?.gradient }}
               >
                 {selectedDesign?.imageUrl ? (
-                  <Image
-                    src={selectedDesign.imageUrl}
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={resolveImageSrc(selectedDesign.imageUrl)}
                     alt={selectedDesign.styleName ?? "Design"}
-                    fill
-                    sizes="56px"
-                    className="object-cover"
+                    className="absolute inset-0 w-full h-full object-cover"
                   />
                 ) : null}
               </div>
@@ -278,10 +377,6 @@ export default function PlacementPage({ params }: { params: Promise<{ sessionId:
             <div className="flex justify-between">
               <span className="text-muted text-xs font-mono">Customer</span>
               <span className="text-ink text-xs font-cinzel font-bold">{customerName}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted text-xs font-mono">Session ID</span>
-              <span className="text-gold text-xs font-mono font-bold">{sessionId}</span>
             </div>
           </div>
 
@@ -562,6 +657,7 @@ export default function PlacementPage({ params }: { params: Promise<{ sessionId:
           {isGeneratingPlacement && (
             <motion.div
               key="loading"
+              ref={loadingRef}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
@@ -613,11 +709,18 @@ export default function PlacementPage({ params }: { params: Promise<{ sessionId:
               transition={{ duration: 0.5 }}
               className="flex flex-col gap-6"
             >
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between flex-wrap gap-2">
                 <h2 className="font-cinzel text-xl font-bold text-ink">Placement Preview</h2>
-                <div className="flex items-center gap-1.5">
-                  <div className="w-2 h-2 rounded-full bg-success animate-pulse" />
-                  <span className="text-success text-xs font-mono">AI Generated</span>
+                <div className="flex items-center gap-2">
+                  {sessionStatus === "completed" && (
+                    <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-gold bg-gold/10 border border-gold/30 px-2.5 py-1 rounded-full">
+                      ✓ Finalized
+                    </span>
+                  )}
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-2 h-2 rounded-full bg-success animate-pulse" />
+                    <span className="text-success text-xs font-mono">AI Generated</span>
+                  </div>
                 </div>
               </div>
 
