@@ -5,17 +5,31 @@ import { motion } from "framer-motion";
 import {
   SHEET_COUNTS,
   STENCIL_MARGIN_MM,
+  PAGE_FORMATS,
+  DEFAULT_PAGE_FORMAT,
+  DEFAULT_SIZE_MM,
+  MIN_SIZE_MM,
+  MAX_SIZE_MM,
+  DEFAULT_INK_TONE,
+  MIN_INK_TONE,
+  MAX_INK_TONE,
+  inkToneFilter,
+  mmToUnit,
+  unitToMm,
   computeStencilLayout,
   defaultStencilCenter,
   loadTrimmedStencilImage,
   downloadTattooStencilPdf,
+  downloadTattooStencilImage,
   type SheetCount,
+  type PageFormat,
+  type SizeUnit,
 } from "@/lib/tattoo-pdf";
 
 interface TattooInstance {
   id: string;
   center: { x: number; y: number };
-  sizePercent: number;
+  sizeMm: number;
   rotation: number;
   mirrored: boolean;
 }
@@ -28,16 +42,31 @@ interface Props {
   onClose: () => void;
 }
 
-const MIN_PERCENT = 20;
-const MAX_PERCENT = 200;
+type ExportFormat = "pdf" | "png" | "jpeg";
 
 export default function TattooPrintStudio({ imageUrl, subtitle, filenameBase = "tattoo-stencil", onClose }: Props) {
   const [count, setCount] = useState<SheetCount>(1);
   const [marginMm, setMarginMm] = useState(STENCIL_MARGIN_MM);
+  const [pageFormat, setPageFormat] = useState<PageFormat>(DEFAULT_PAGE_FORMAT);
+  const [exportFormat, setExportFormat] = useState<ExportFormat>("pdf");
+  const [sizeUnit, setSizeUnit] = useState<SizeUnit>("in");
+  const [inkTone, setInkTone] = useState(DEFAULT_INK_TONE);
+  const [isPageSizeOpen, setIsPageSizeOpen] = useState(false);
+  const pageSizeRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (pageSizeRef.current && !pageSizeRef.current.contains(event.target as Node)) {
+        setIsPageSizeOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const nextId = useRef(2);
   const [instances, setInstances] = useState<TattooInstance[]>([
-    { id: "1", center: defaultStencilCenter(1), sizePercent: 100, rotation: 0, mirrored: true },
+    { id: "1", center: defaultStencilCenter(1, DEFAULT_PAGE_FORMAT), sizeMm: DEFAULT_SIZE_MM, rotation: 0, mirrored: true },
   ]);
   const [selectedId, setSelectedId] = useState("1");
 
@@ -51,7 +80,7 @@ export default function TattooPrintStudio({ imageUrl, subtitle, filenameBase = "
   const [stage, setStage] = useState({ w: 0, h: 0 });
 
   // Load the design once and trim its empty frame so sizing/positioning track
-  // the actual ink. The trimmed image is reused for both preview and PDF.
+  // the actual ink. The trimmed image is reused for both preview and export.
   useEffect(() => {
     let cancelled = false;
     loadTrimmedStencilImage(imageUrl)
@@ -66,9 +95,17 @@ export default function TattooPrintStudio({ imageUrl, subtitle, filenameBase = "
 
   // Switch sheet count, recentre all instances on the new grid.
   function handleCountChange(n: SheetCount) {
-    const newCenter = defaultStencilCenter(n);
+    const newCenter = defaultStencilCenter(n, pageFormat);
     setCount(n);
     setInstances(prev => prev.map(inst => ({ ...inst, center: newCenter })));
+  }
+
+  // Switch page format, recentre all instances on the new grid.
+  function handlePageFormatChange(p: PageFormat) {
+    const newCenter = defaultStencilCenter(count, p);
+    setPageFormat(p);
+    setInstances(prev => prev.map(inst => ({ ...inst, center: newCenter })));
+    setIsPageSizeOpen(false);
   }
 
   // Measure the available preview area so we can scale mm → px to fit.
@@ -82,8 +119,8 @@ export default function TattooPrintStudio({ imageUrl, subtitle, filenameBase = "
 
   // Compute layout for every instance (cols/rows/totalW/totalH are identical across all).
   const instanceLayouts = useMemo(
-    () => instances.map(inst => computeStencilLayout({ count, sizePercent: inst.sizePercent, aspect, center: inst.center })),
-    [instances, count, aspect]
+    () => instances.map(inst => computeStencilLayout({ count, sizeMm: inst.sizeMm, aspect, center: inst.center, pageSize: pageFormat })),
+    [instances, count, aspect, pageFormat]
   );
 
   // Grid dimensions — same for every instance, so read from the first.
@@ -175,15 +212,28 @@ export default function TattooPrintStudio({ imageUrl, subtitle, filenameBase = "
     setDownloading(true);
     setDownloadError(null);
     try {
-      await downloadTattooStencilPdf({
+      const sharedOpts = {
         imageUrl,
         image: img,
         count,
-        instances: instances.map(({ center, sizePercent, rotation, mirrored }) => ({ center, sizePercent, rotation, mirrored })),
+        pageSize: pageFormat,
+        instances: instances.map(({ center, sizeMm, rotation, mirrored }) => ({ center, sizeMm, rotation, mirrored })),
         subtitle,
-        filename: `${filenameBase}-${count}xA4.pdf`,
         marginMm,
-      });
+        inkTone,
+      };
+      if (exportFormat === "pdf") {
+        await downloadTattooStencilPdf({
+          ...sharedOpts,
+          filename: `${filenameBase}-${count}x${pageFormat.label}.pdf`,
+        });
+      } else {
+        await downloadTattooStencilImage({
+          ...sharedOpts,
+          format: exportFormat,
+          filename: `${filenameBase}.${exportFormat}`,
+        });
+      }
     } catch (err) {
       setDownloadError((err as Error).message);
     } finally {
@@ -204,6 +254,20 @@ export default function TattooPrintStudio({ imageUrl, subtitle, filenameBase = "
     border: "1px solid #b4b4b4",
   }), [marginMm, scale]);
 
+  // Slider range in the current display unit.
+  const sliderMin = sizeUnit === "in" ? 1 : 2.5;
+  const sliderMax = sizeUnit === "in" ? 20 : 50;
+  const sliderStep = sizeUnit === "in" ? 0.25 : 0.5;
+  const sizeInCurrentUnit = mmToUnit(selected.sizeMm, sizeUnit);
+  const pctOfPage = Math.round((selected.sizeMm / Math.min(pageFormat.w, pageFormat.h)) * 100);
+
+  function handleSizeInput(value: string) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return;
+    const mm = Math.min(MAX_SIZE_MM, Math.max(MIN_SIZE_MM, unitToMm(n, sizeUnit)));
+    updateSelected({ sizeMm: mm });
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -217,7 +281,7 @@ export default function TattooPrintStudio({ imageUrl, subtitle, filenameBase = "
           <div>
             <p className="text-gold text-[10px] font-mono tracking-[0.2em] uppercase">Print Studio</p>
             <p className="text-white/60 text-xs font-mono mt-0.5">
-              {cols}×{rows} grid · {totalW}×{totalH}mm · print at 100%
+              {cols}×{rows} grid · {pageFormat.label} · {Math.round(totalW)}×{Math.round(totalH)}mm · print at 100%
             </p>
           </div>
           <button
@@ -250,7 +314,7 @@ export default function TattooPrintStudio({ imageUrl, subtitle, filenameBase = "
                     className="border border-dashed border-gold/40 flex items-start justify-start"
                   >
                     <span className="m-1 text-[8px] font-mono text-gold/50 bg-white/70 px-1 rounded">
-                      {cols * rows > 1 ? `R${Math.floor(i / cols) + 1}·C${(i % cols) + 1}` : "A4"}
+                      {cols * rows > 1 ? `R${Math.floor(i / cols) + 1}·C${(i % cols) + 1}` : pageFormat.label}
                     </span>
                   </div>
                 ))}
@@ -285,6 +349,7 @@ export default function TattooPrintStudio({ imageUrl, subtitle, filenameBase = "
                       transform: `${inst.mirrored ? "scaleX(-1) " : ""}rotate(${inst.rotation}deg)`,
                       touchAction: "none",
                       objectFit: "contain",
+                      filter: inkTone !== DEFAULT_INK_TONE ? inkToneFilter(inkTone) : undefined,
                       outline: isSelected ? "2px solid rgba(201,168,76,0.85)" : "none",
                       outlineOffset: "3px",
                     }}
@@ -316,9 +381,50 @@ export default function TattooPrintStudio({ imageUrl, subtitle, filenameBase = "
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-5 flex flex-col gap-6">
-          {/* A4 count */}
+          {/* Page format */}
+          <div ref={pageSizeRef} className="relative flex flex-col gap-2">
+            <label className="text-[10px] font-mono tracking-[0.15em] uppercase text-muted">Page size</label>
+            <button
+              type="button"
+              onClick={() => setIsPageSizeOpen((v) => !v)}
+              className="w-full bg-bg border border-cleo-border hover:border-gold/50 rounded-lg px-3 py-2.5 text-ink transition-colors flex items-center justify-between cursor-pointer"
+            >
+              <span className="flex items-baseline gap-2">
+                <span className="font-cinzel font-bold text-sm text-gold">{pageFormat.label}</span>
+                <span className="text-[10px] text-muted font-mono">{pageFormat.w}×{pageFormat.h}mm</span>
+              </span>
+              <svg
+                className={`w-3.5 h-3.5 text-muted transition-transform flex-shrink-0 ${isPageSizeOpen ? "rotate-180" : ""}`}
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {isPageSizeOpen && (
+              <div className="absolute top-full mt-2 left-0 w-full bg-surface-2 border border-cleo-border rounded-xl shadow-2xl overflow-hidden z-50 max-h-64 overflow-y-auto">
+                {PAGE_FORMATS.map((p) => (
+                  <button
+                    key={p.key}
+                    type="button"
+                    onClick={() => handlePageFormatChange(p)}
+                    className={`w-full text-left px-3 py-2.5 flex items-baseline gap-2 transition-colors hover:bg-gold/10 cursor-pointer ${
+                      pageFormat.key === p.key ? "bg-gold/20" : ""
+                    }`}
+                  >
+                    <span className={`font-cinzel font-bold text-sm ${pageFormat.key === p.key ? "text-gold" : "text-ink"}`}>
+                      {p.label}
+                    </span>
+                    <span className="text-[10px] text-muted font-mono">{p.w}×{p.h}mm</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Sheet count */}
           <div className="flex flex-col gap-2">
-            <label className="text-[10px] font-mono tracking-[0.15em] uppercase text-muted">How many A4 sheets</label>
+            <label className="text-[10px] font-mono tracking-[0.15em] uppercase text-muted">How many sheets</label>
             <div className="grid grid-cols-4 gap-1.5">
               {SHEET_COUNTS.map((n) => (
                 <button
@@ -334,7 +440,7 @@ export default function TattooPrintStudio({ imageUrl, subtitle, filenameBase = "
                 </button>
               ))}
             </div>
-            <p className="text-muted/50 text-[10px] font-mono">One large tattoo split across the sheets.</p>
+            <p className="text-muted/50 text-[10px] font-mono">For large tattoos that need tiling across multiple sheets.</p>
           </div>
 
           {/* Copies */}
@@ -383,28 +489,51 @@ export default function TattooPrintStudio({ imageUrl, subtitle, filenameBase = "
             )}
           </div>
 
-          {/* Size percentage */}
+          {/* Tattoo size — real-world, in inches or cm */}
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
-              <label className="text-[10px] font-mono tracking-[0.15em] uppercase text-muted">Size adjustment</label>
-              <span className="text-gold text-xs font-mono font-bold">{selected.sizePercent}%</span>
+              <label className="text-[10px] font-mono tracking-[0.15em] uppercase text-muted">Tattoo size</label>
+              <div className="flex items-center gap-1 bg-bg border border-cleo-border rounded-lg p-0.5">
+                {(["in", "cm"] as const).map((u) => (
+                  <button
+                    key={u}
+                    onClick={() => setSizeUnit(u)}
+                    className={`px-2 py-0.5 rounded-md text-[10px] font-mono uppercase transition-colors cursor-pointer ${
+                      sizeUnit === u ? "bg-gold text-bg" : "text-muted hover:text-ink"
+                    }`}
+                  >
+                    {u}
+                  </button>
+                ))}
+              </div>
             </div>
-            <input
-              type="range"
-              min={MIN_PERCENT}
-              max={MAX_PERCENT}
-              step={1}
-              value={selected.sizePercent}
-              onChange={(e) => updateSelected({ sizePercent: Number(e.target.value) })}
-              className="w-full accent-gold cursor-pointer"
-            />
-            <div className="flex justify-between text-[9px] font-mono text-muted/40">
-              <span>{MIN_PERCENT}%</span>
-              <span>100%</span>
-              <span>{MAX_PERCENT}%</span>
+            <div className="flex items-center gap-2">
+              <input
+                type="range"
+                min={sliderMin}
+                max={sliderMax}
+                step={sliderStep}
+                value={sizeInCurrentUnit}
+                onChange={(e) => handleSizeInput(e.target.value)}
+                className="flex-1 accent-gold cursor-pointer"
+              />
+              <div className="relative flex-shrink-0 w-[4.5rem]">
+                <input
+                  type="number"
+                  min={mmToUnit(MIN_SIZE_MM, sizeUnit)}
+                  max={mmToUnit(MAX_SIZE_MM, sizeUnit)}
+                  step={sizeUnit === "in" ? 0.1 : 0.5}
+                  value={Math.round(sizeInCurrentUnit * 100) / 100}
+                  onChange={(e) => handleSizeInput(e.target.value)}
+                  className="w-full bg-bg border border-cleo-border rounded-lg pl-2 pr-6 py-1.5 text-ink text-xs font-mono focus:outline-none focus:border-gold transition-colors [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                />
+                <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted text-[10px] font-mono pointer-events-none">{sizeUnit}</span>
+              </div>
             </div>
             <p className="text-muted/50 text-[10px] font-mono">
-              Tattoo ≈ {Math.round(selectedLayout.tattooW)}×{Math.round(selectedLayout.tattooH)}mm on paper.
+              ≈ {mmToUnit(selected.sizeMm, sizeUnit === "in" ? "cm" : "in").toFixed(1)}{sizeUnit === "in" ? "cm" : "in"} ·
+              {" "}{pctOfPage}% of one {pageFormat.label} sheet ·
+              {" "}{Math.round(selectedLayout.tattooW)}×{Math.round(selectedLayout.tattooH)}mm on paper
             </p>
           </div>
 
@@ -481,7 +610,63 @@ export default function TattooPrintStudio({ imageUrl, subtitle, filenameBase = "
               <span>20mm</span>
             </div>
             <p className="text-muted/50 text-[10px] font-mono leading-snug">
-              Grey border inset shown in preview and printed in PDF. Default 2mm matches most printer safe-areas.
+              Grey border inset shown in preview. Printed in the PDF only — PNG/JPEG exports are the flat design with no guide lines.
+            </p>
+          </div>
+
+          {/* Ink darkness */}
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] font-mono tracking-[0.15em] uppercase text-muted">Ink darkness</label>
+              <span className="text-gold text-xs font-mono font-bold">
+                {inkTone === DEFAULT_INK_TONE ? "Normal" : inkTone < 0 ? `${-inkTone}% Darker` : `${inkTone}% Lighter`}
+              </span>
+            </div>
+            <input
+              type="range"
+              min={MIN_INK_TONE}
+              max={MAX_INK_TONE}
+              step={2}
+              value={inkTone}
+              onChange={(e) => setInkTone(Number(e.target.value))}
+              className="w-full accent-gold cursor-pointer"
+            />
+            <div className="flex justify-between text-[9px] font-mono text-muted/40">
+              <span>Darker</span>
+              <span>Normal</span>
+              <span>Lighter</span>
+            </div>
+            <p className="text-muted/50 text-[10px] font-mono leading-snug">
+              Adjusts how dark or light the ink prints — matches faded or heavily saturated reference designs. Applied to the preview and every export.
+            </p>
+          </div>
+
+          {/* Export format */}
+          <div className="flex flex-col gap-2">
+            <label className="text-[10px] font-mono tracking-[0.15em] uppercase text-muted">File format</label>
+            <div className="grid grid-cols-3 gap-1.5">
+              {([
+                { key: "pdf", label: "PDF" },
+                { key: "png", label: "PNG" },
+                { key: "jpeg", label: "JPEG" },
+              ] as const).map((f) => (
+                <button
+                  key={f.key}
+                  onClick={() => setExportFormat(f.key)}
+                  className={`py-2.5 rounded-lg font-cinzel font-bold text-xs border transition-all cursor-pointer ${
+                    exportFormat === f.key
+                      ? "bg-gold text-bg border-gold shadow-[0_0_12px_rgba(201,168,76,0.3)]"
+                      : "bg-bg text-muted border-cleo-border hover:border-gold/40 hover:text-ink"
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-muted/50 text-[10px] font-mono">
+              {exportFormat === "pdf"
+                ? "One page per sheet, with cut/tape guides — best for printing at true size."
+                : "One flat image of the whole layout — best for sharing or a quick reference."}
             </p>
           </div>
         </div>
@@ -508,7 +693,9 @@ export default function TattooPrintStudio({ imageUrl, subtitle, filenameBase = "
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
                 </svg>
-                Download {count} × A4 PDF
+                {exportFormat === "pdf"
+                  ? `Download ${count} × ${pageFormat.label} PDF`
+                  : `Download ${exportFormat.toUpperCase()}`}
               </>
             )}
           </motion.button>

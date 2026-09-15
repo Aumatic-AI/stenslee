@@ -1,12 +1,14 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { createKeiTask, waitForKeiTask, KeiTaskFailedError, KeiCreditsError } from "@/lib/kei-api";
+// TEST: swapped from "@/lib/prompts" to the minimal-prompt version — see
+// prompts-test.ts. Revert this import to go back to the full-length prompts.
 import {
   buildPlacementPrompt,
   buildCompositePrompt,
   buildCompositePromptForComplexAnatomy,
   classifySurface,
-} from "@/lib/prompts";
-import { uploadBase64, uploadFromUrl } from "@/lib/storage";
+} from "@/lib/prompts-test";
+import { startJob, setSlot } from "@/lib/generation-jobs";
 
 export const maxDuration = 300;
 
@@ -14,9 +16,13 @@ type KeiRunResult =
   | { ok: true; url: string; taskId: string }
   | { ok: false; kind: "failed" | "timeout" | "error" | "credits"; reason: string; taskId?: string };
 
-// Final body-placement image is rendered with Gemini 3 Pro Image (nano-banana-pro)
-// via KEI for higher photorealism. Design generation still uses gpt-image.
-const PLACEMENT_MODEL = "nano-banana-pro" as const;
+// TEST: switched from Gemini 3 Pro Image (nano-banana-pro) to gpt-image —
+// nano-banana-pro kept drifting the tattoo's position/pose instead of
+// strictly preserving the composite; gpt-image's edit mode is built for
+// exactly that "change only this, preserve everything else" behavior and
+// already proved out for the Rework edit flow. Revert to "nano-banana-pro"
+// to go back.
+const PLACEMENT_MODEL = "gpt-image-2-image-to-image" as const;
 
 // Single attempt at a KEI generation. Caller decides whether to retry.
 async function runKeiOnce(prompt: string, inputUrls: string[]): Promise<KeiRunResult> {
@@ -48,117 +54,81 @@ async function runKeiWithRetry(prompt: string, inputUrls: string[]): Promise<Kei
   return runKeiOnce(prompt, inputUrls);
 }
 
-function statusForKind(kind: "failed" | "timeout" | "error" | "credits"): number {
-  if (kind === "credits") return 402;
-  if (kind === "timeout") return 504;
-  return 502;
+// Fetching from KEI works reliably from this server (unlike uploading TO
+// Supabase, which doesn't) — download the result here but hand the bytes to
+// the browser as base64 and let it do the upload.
+async function fetchAsBase64(url: string): Promise<string> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Fetch failed (${res.status}) for ${url}`);
+  const contentType = res.headers.get("content-type") ?? "image/png";
+  const buffer = Buffer.from(await res.arrayBuffer());
+  return `data:${contentType};base64,${buffer.toString("base64")}`;
 }
 
+// Keyed separately from the chat's per-session generation job so a
+// placement generation never collides with an in-flight chat edit.
+function placementJobKey(sessionId: string): string {
+  return `placement:${sessionId}`;
+}
 
 export async function POST(req: NextRequest) {
-  const { sessionId, tattooImageUrl, bodyImageB64, compositeImageB64, placementText } = await req.json();
+  // tattooImageUrl / bodyPhotoUrl / compositeUrl are already-hosted Supabase
+  // URLs — the browser uploads them directly before calling this route,
+  // since uploading TO Supabase from this server is unreliable.
+  const { sessionId, tattooImageUrl, bodyPhotoUrl, compositeUrl, placementText } = await req.json();
 
-  if (!tattooImageUrl && !compositeImageB64) {
-    return NextResponse.json({ error: "tattooImageUrl or compositeImageB64 is required" }, { status: 400 });
+  if (!sessionId) {
+    return Response.json({ error: "sessionId is required" }, { status: 400 });
   }
+  if (!tattooImageUrl && !compositeUrl) {
+    return Response.json({ error: "tattooImageUrl or compositeUrl is required" }, { status: 400 });
+  }
+
+  let prompt: string;
+  let inputUrls: string[];
 
   // ── Composite mode: user manually positioned the tattoo ──────────────
   // Sends 3 images: composite (position) + tattoo design (detail) + body photo (skin/light)
-  if (compositeImageB64) {
-    let compositeUrl: string;
-    let bodyPhotoStorageUrl: string | null = null;
-
-    try {
-      compositeUrl = await uploadBase64(compositeImageB64 as string, sessionId, "composites");
-    } catch (err) {
-      return NextResponse.json(
-        { error: `Composite upload failed: ${(err as Error).message}` },
-        { status: 500 }
-      );
-    }
-
-    // Image 1: composite (exact position reference)
-    // Image 2: clean tattoo design (detail reference) — already a hosted Supabase URL
-    // Image 3: original body photo (skin/lighting reference)
-    const inputUrls: string[] = [compositeUrl];
+  if (compositeUrl) {
+    inputUrls = [compositeUrl];
     if (tattooImageUrl) inputUrls.push(tattooImageUrl as string);
-    if (bodyImageB64) {
-      try {
-        const bodyUrl = await uploadBase64(bodyImageB64 as string, sessionId, "body");
-        inputUrls.push(bodyUrl);
-        bodyPhotoStorageUrl = bodyUrl;
-      } catch {
-        // Non-fatal — proceed with 2 images if body upload fails
-        console.warn("[placement] Body photo upload failed — proceeding with 2-image composite");
-      }
-    }
+    if (bodyPhotoUrl) inputUrls.push(bodyPhotoUrl as string);
 
     const surface = classifySurface(placementText ?? "");
-    const compositePrompt =
-      surface === "flat" ? buildCompositePrompt() : buildCompositePromptForComplexAnatomy(surface);
+    prompt = surface === "flat" ? buildCompositePrompt() : buildCompositePromptForComplexAnatomy(surface);
+  } else {
+    // ── Standard mode: separate tattoo + optional body photo ────────────
+    inputUrls = [tattooImageUrl];
+    if (bodyPhotoUrl) inputUrls.push(bodyPhotoUrl as string);
+    prompt = buildPlacementPrompt(placementText ?? "", !!bodyPhotoUrl);
+  }
 
-    const result = await runKeiWithRetry(compositePrompt, inputUrls);
+  // ── Start the job and return immediately ─────────────────────────────
+  // The client polls /api/generation-status instead of holding this
+  // connection open for the 1-3 minutes this generation can take — that
+  // also means a page reload doesn't kill an in-progress preview.
+  const jobKey = placementJobKey(sessionId);
+  startJob(jobKey, 1, 1);
+
+  void (async () => {
+    const result = await runKeiWithRetry(prompt, inputUrls);
     if (!result.ok) {
-      return NextResponse.json(
-        {
-          error: result.reason,
-          kind: result.kind,
-          ...(result.kind === "credits" ? { code: "insufficient_credits" } : {}),
-          taskId: result.taskId,
-        },
-        { status: statusForKind(result.kind) }
-      );
+      console.warn(`[placement] generation failed: ${result.reason}`);
+      setSlot(jobKey, 0, {
+        status: "error",
+        reason: result.reason,
+        code: result.kind === "credits" ? "insufficient_credits" : undefined,
+      });
+      return;
     }
-
     try {
-      const imageUrl = await uploadFromUrl(result.url, sessionId, "previews");
-      return NextResponse.json({ imageUrl, bodyPhotoUrl: bodyPhotoStorageUrl ?? compositeUrl, taskId: result.taskId });
+      const imageBase64 = await fetchAsBase64(result.url);
+      setSlot(jobKey, 0, { status: "done", imageBase64 });
     } catch (err) {
-      return NextResponse.json(
-        { error: `Result upload failed: ${(err as Error).message}` },
-        { status: 500 }
-      );
+      console.error("[placement] fetching result failed:", err);
+      setSlot(jobKey, 0, { status: "error", reason: `Fetching result failed: ${(err as Error).message}` });
     }
-  }
+  })();
 
-  // ── Standard mode: separate tattoo + optional body photo ─────────────
-  const hasBodyPhoto = !!bodyImageB64;
-  const inputUrls: string[] = [tattooImageUrl];
-  let bodyPhotoStorageUrl: string | null = null;
-
-  if (hasBodyPhoto) {
-    try {
-      bodyPhotoStorageUrl = await uploadBase64(bodyImageB64 as string, sessionId, "body");
-      inputUrls.push(bodyPhotoStorageUrl);
-    } catch (err) {
-      return NextResponse.json(
-        { error: `Body photo upload failed: ${(err as Error).message}` },
-        { status: 500 }
-      );
-    }
-  }
-
-  const prompt = buildPlacementPrompt(placementText ?? "", hasBodyPhoto);
-  const result = await runKeiWithRetry(prompt, inputUrls);
-  if (!result.ok) {
-    return NextResponse.json(
-      {
-        error: result.reason,
-        kind: result.kind,
-        ...(result.kind === "credits" ? { code: "insufficient_credits" } : {}),
-        taskId: result.taskId,
-      },
-      { status: statusForKind(result.kind) }
-    );
-  }
-
-  try {
-    const imageUrl = await uploadFromUrl(result.url, sessionId, "previews");
-    return NextResponse.json({ imageUrl, bodyPhotoUrl: bodyPhotoStorageUrl, taskId: result.taskId });
-  } catch (err) {
-    return NextResponse.json(
-      { error: `Result upload failed: ${(err as Error).message}` },
-      { status: 500 }
-    );
-  }
+  return Response.json({ ok: true });
 }

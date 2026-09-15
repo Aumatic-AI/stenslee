@@ -3,7 +3,7 @@
 // Edit this file to tune what gets sent to the image model.
 // ============================================================
 
-import { getColorsByHex } from "@/lib/tattoo-colors";
+import { resolveColors } from "@/lib/tattoo-colors";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -623,7 +623,7 @@ const STYLE_PROMPT_DESCRIPTORS: Record<string, StyleDescriptor> = {
 // ── Helpers ──────────────────────────────────────────────────
 
 function buildPaletteBlock(colorHexes: string[] = []): { directive: string; constraint: string } {
-  const palette = getColorsByHex(colorHexes);
+  const palette = resolveColors(colorHexes);
 
   if (palette.length === 0) {
     return {

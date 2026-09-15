@@ -2,6 +2,7 @@
 
 import { useRef, useState, useEffect, useCallback, useMemo } from "react";
 import { motion } from "framer-motion";
+import { resolveImageSrc } from "@/lib/image-src";
 
 interface Props {
   bodyPhotoUrl: string;
@@ -11,10 +12,8 @@ interface Props {
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {
-  // Blob/data URLs are same-origin — load directly, no crossOrigin needed.
-  // External URLs are routed through our proxy so the canvas doesn't get tainted.
   const isLocal = src.startsWith("blob:") || src.startsWith("data:");
-  const resolvedSrc = isLocal ? src : `/api/proxy-image?url=${encodeURIComponent(src)}`;
+  const resolvedSrc = resolveImageSrc(src);
 
   return new Promise((resolve, reject) => {
     const img = new Image();

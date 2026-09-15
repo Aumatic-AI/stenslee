@@ -1,7 +1,19 @@
 import { NextRequest } from "next/server";
 import { buildTattooPrompt, createKeiTask, waitForKeiTask, KeiTaskFailedError, KeiCreditsError } from "@/lib/kei-api";
 import type { RefinementInfo } from "@/lib/kei-api";
-import { uploadBase64, uploadFromUrl } from "@/lib/storage";
+import { uploadBase64 } from "@/lib/storage";
+import { startJob, setSlot } from "@/lib/generation-jobs";
+
+// Fetching from KEI works reliably from this server (unlike uploading TO
+// Supabase, which doesn't) — so download the result here but hand the bytes
+// to the browser as base64 and let IT do the unreliable-from-Node upload.
+async function fetchAsBase64(url: string): Promise<string> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Fetch failed (${res.status}) for ${url}`);
+  const contentType = res.headers.get("content-type") ?? "image/png";
+  const buffer = Buffer.from(await res.arrayBuffer());
+  return `data:${contentType};base64,${buffer.toString("base64")}`;
+}
 
 type RunResult =
   | { ok: true; url: string }
@@ -29,6 +41,7 @@ export const maxDuration = 300;
 export async function POST(req: NextRequest) {
   const {
     sessionId,
+    iteration,
     description,
     style,
     images: b64Images = [],
@@ -42,10 +55,14 @@ export async function POST(req: NextRequest) {
     targetBodyArea = "",
     count = 5,
     textTattooFont,
+    parentDesignIds = [] as string[], // tattoo_designs.id values — for job/lineage tracking, not generation input
   } = await req.json();
 
   if (!description?.trim()) {
     return Response.json({ error: "description is required" }, { status: 400 });
+  }
+  if (!sessionId || typeof iteration !== "number") {
+    return Response.json({ error: "sessionId and iteration are required" }, { status: 400 });
   }
 
   const isRefinement = refineImageUrls.length > 0 && refinementText.trim().length > 0;
@@ -106,54 +123,35 @@ export async function POST(req: NextRequest) {
     textTattooFont ? { font: textTattooFont } : undefined
   );
 
-  // ── Stream results as each task completes ────────────────────────────
-  const { readable, writable } = new TransformStream();
-  const writer = writable.getWriter();
-  const encoder = new TextEncoder();
+  // ── Start the job and return immediately ─────────────────────────────
+  // The client polls /api/generation-status instead of holding this
+  // connection open for the 1-2 minutes generation can take — that also
+  // means a page reload doesn't kill an in-progress batch.
+  const clampedCount = Math.min(5, Math.max(1, Number(count) || 5));
+  startJob(sessionId, iteration, clampedCount, parentDesignIds, isRefinement ? refinementText : null);
 
-  const emit = (event: object) =>
-    writer.write(encoder.encode(JSON.stringify(event) + "\n"));
-
-  (async () => {
-    const tasks = Array.from({ length: count }, (_, index) =>
-      runOneTask(prompt, inputUrls, generationModel)
-        .then(async (result) => {
-          if (!result.ok) {
-            console.warn(`[generate] task ${index} failed: ${result.reason}`);
-            await emit({
-              type: "error",
-              index,
-              reason: result.reason,
-              ...(result.credits ? { code: "insufficient_credits" } : {}),
-            });
-            return;
-          }
-          try {
-            const url = await uploadFromUrl(result.url, sessionId, "designs");
-            await emit({
-              type: "result",
-              index,
-              image: { id: `kei-${Date.now()}-${index}`, imageUrl: url },
-            });
-          } catch (err) {
-            console.error(`[generate] storage upload failed for task ${index}:`, err);
-            await emit({ type: "error", index, reason: `Image upload failed: ${(err as Error).message}` });
-          }
-        })
-        .catch(async (err) => {
-          await emit({ type: "error", index, reason: (err as Error).message });
-        })
+  void (async () => {
+    await Promise.allSettled(
+      Array.from({ length: clampedCount }, (_, index) =>
+        runOneTask(prompt, inputUrls, generationModel)
+          .then(async (result) => {
+            if (!result.ok) {
+              console.warn(`[generate] task ${index} failed: ${result.reason}`);
+              setSlot(sessionId, index, { status: "error", reason: result.reason, code: result.credits ? "insufficient_credits" : undefined });
+              return;
+            }
+            try {
+              const imageBase64 = await fetchAsBase64(result.url);
+              setSlot(sessionId, index, { status: "done", imageBase64 });
+            } catch (err) {
+              console.error(`[generate] fetching result failed for task ${index}:`, err);
+              setSlot(sessionId, index, { status: "error", reason: `Image fetch failed: ${(err as Error).message}` });
+            }
+          })
+          .catch((err) => setSlot(sessionId, index, { status: "error", reason: (err as Error).message }))
+      )
     );
-
-    await Promise.allSettled(tasks);
-    await emit({ type: "done" });
-    await writer.close();
   })();
 
-  return new Response(readable, {
-    headers: {
-      "Content-Type": "application/x-ndjson",
-      "Cache-Control": "no-cache",
-    },
-  });
+  return Response.json({ ok: true, iteration });
 }

@@ -56,6 +56,15 @@ interface AppState {
   
   // Text Tattoo Modal state (persisted across reloads if active)
   textTattooFont: string | null;
+  isTextTattoo: boolean;
+
+  // Rework (cover-up/extend) — a session is either "ai_design" or "rework"
+  flowType: "ai_design" | "rework";
+  reworkMode: "cover" | "extend";
+  reworkPhoto: string | null; // the existing-tattoo photo to cover/extend (blob: until generation uploads it)
+  // Set right before navigating Design -> Chat; the chat screen consumes it
+  // to know it should kick off the first generation itself, then clears it.
+  pendingGeneration: boolean;
 
   // Placement step
   placementText: string;
@@ -63,6 +72,11 @@ interface AppState {
   finalComposite: string | null;
   isGeneratingPlacement: boolean;
   placementDbId: string | null; // placements.id of the most recent saved attempt
+
+  // The session row's actual status (from the DB, via hydrateFromSession) —
+  // lets a reloaded page tell "already finalized" from "still in progress"
+  // without relying on any local-only flag that resets on reload.
+  sessionStatus: "active" | "completed" | "abandoned";
 
   // Hydration status — set true after first hydrate attempt for current session
   hydratedSessionId: string | null;
@@ -74,6 +88,11 @@ interface AppState {
   setTattooStyle: (style: string) => void;
   setTattooDescription: (text: string) => void;
   setTargetBodyArea: (text: string) => void;
+  setFlowType: (type: "ai_design" | "rework") => void;
+  setReworkMode: (mode: "cover" | "extend") => void;
+  setReworkPhoto: (url: string | null) => void;
+  setPendingGeneration: (pending: boolean) => void;
+  setIsTextTattoo: (value: boolean) => void;
   addReferenceImage: (url: string) => void;
   removeReferenceImage: (index: number) => void;
   replaceReferenceImage: (oldUrl: string, newUrl: string) => void;
@@ -93,9 +112,10 @@ interface AppState {
   finishPlacement: (composite: string) => void;
   setPlacementDbId: (id: string | null) => void;
   // Supabase persistence
-  persistDesigns: (designs: DesignVariant[]) => Promise<DesignVariant[]>;
+  persistDesigns: (designs: DesignVariant[], meta?: { iteration?: number; parentDesignIds?: string[]; userInstruction?: string }) => Promise<DesignVariant[]>;
   persistPlacement: (data: { placementText?: string; bodyPhotoUrl?: string; compositeUrl?: string }) => Promise<string | null>;
   finalizeSession: (designId: string, placementId: string) => Promise<void>;
+  finalizeReworkSession: (designId: string) => Promise<void>;
   // Restore state from Supabase for the given session (used after reload)
   hydrateFromSession: (sessionId: string) => Promise<void>;
   reset: () => void;
@@ -115,6 +135,11 @@ const defaultState = {
   tattooDescription: "",
   targetBodyArea: "",
   textTattooFont: null,
+  isTextTattoo: false,
+  flowType: "ai_design" as "ai_design" | "rework",
+  reworkMode: "cover" as "cover" | "extend",
+  reworkPhoto: null as string | null,
+  pendingGeneration: false,
   referenceImages: [],
   selectedColors: [] as string[],
   generatedDesigns: [],
@@ -128,6 +153,7 @@ const defaultState = {
   finalComposite: null,
   isGeneratingPlacement: false,
   placementDbId: null as string | null,
+  sessionStatus: "active" as "active" | "completed" | "abandoned",
   hydratedSessionId: null as string | null,
 };
 
@@ -139,6 +165,11 @@ const freshSessionDesignState = {
   tattooDescription: "",
   targetBodyArea: "",
   textTattooFont: null,
+  isTextTattoo: false,
+  flowType: "ai_design" as "ai_design" | "rework",
+  reworkMode: "cover" as "cover" | "extend",
+  reworkPhoto: null as string | null,
+  pendingGeneration: false,
   referenceImages: [] as string[],
   selectedColors: [] as string[],
   generatedDesigns: [],
@@ -152,6 +183,7 @@ const freshSessionDesignState = {
   finalComposite: null,
   isGeneratingPlacement: false,
   placementDbId: null,
+  sessionStatus: "active" as "active" | "completed" | "abandoned",
 };
 
 export const useAppStore = create<AppState>()(
@@ -233,6 +265,16 @@ export const useAppStore = create<AppState>()(
 
   setTattooStyle: (style) => set({ tattooStyle: style }),
 
+  setFlowType: (type) => set({ flowType: type }),
+
+  setReworkMode: (mode) => set({ reworkMode: mode }),
+
+  setReworkPhoto: (url) => set({ reworkPhoto: url }),
+
+  setPendingGeneration: (pending) => set({ pendingGeneration: pending }),
+
+  setIsTextTattoo: (value) => set({ isTextTattoo: value }),
+
   generateDesigns: () =>
     set((s) => ({
       isGenerating: true,
@@ -281,17 +323,19 @@ export const useAppStore = create<AppState>()(
 
   setPlacementDbId: (id) => set({ placementDbId: id }),
 
-  persistDesigns: async (designs) => {
-    const { sessionId, tattooStyle, tattooDescription, targetBodyArea, iterationCount } = get();
+  persistDesigns: async (designs, meta) => {
+    const { sessionId, tattooStyle, tattooDescription, targetBodyArea, iterationCount, flowType } = get();
     if (!sessionId) return designs;
 
-    // Keep session row in sync with latest style/description/body-area hint
+    // Keep session row in sync with latest style/description/body-area hint.
+    // Rework sessions don't use target_body_area (the source photo already
+    // shows the placement), so leave it untouched for that flow.
     await supabase
       .from("sessions")
       .update({
         tattoo_style: tattooStyle,
         tattoo_description: tattooDescription,
-        target_body_area: targetBodyArea || null,
+        ...(flowType === "ai_design" ? { target_body_area: targetBodyArea || null } : {}),
       })
       .eq("id", sessionId);
 
@@ -305,8 +349,13 @@ export const useAppStore = create<AppState>()(
           session_id: sessionId,
           image_url: d.imageUrl!,
           style_name: d.styleName,
-          pattern_type: d.patternType,
-          iteration: iterationCount,
+          // Rework has no pattern-type concept (it's an edit of an existing
+          // tattoo, not a style-based generation) — "mandala" is only ever a
+          // required placeholder value on the caller's side for this flow.
+          pattern_type: flowType === "rework" ? null : d.patternType,
+          iteration: meta?.iteration ?? iterationCount,
+          parent_design_ids: meta?.parentDesignIds ?? [],
+          user_instruction: meta?.userInstruction ?? null,
         }))
       )
       .select("id, image_url");
@@ -351,13 +400,20 @@ export const useAppStore = create<AppState>()(
       p_design_id: designId,
       p_placement_id: placementId,
     });
-    if (!rpcError) return;
+    if (!rpcError) { set({ sessionStatus: "completed" }); return; }
 
     // RPC failed (most often: live DB still has the pre-hotfix function, so
     // a user_preferences NOT NULL violation aborts the whole transaction).
     // The critical path doesn't need the RPC — fall back to plain table ops.
     // user_preferences is analytics-only; we deliberately skip it here.
     console.warn("finalize_session RPC failed — falling back to manual sequence:", rpcError);
+
+    // Unset any previous finalized choice first — only one design/placement
+    // can be finalized at a time, but nothing is ever deleted.
+    await Promise.all([
+      supabase.from("tattoo_designs").update({ is_finalized: false }).eq("session_id", sessionId).eq("is_finalized", true),
+      supabase.from("placements").update({ is_finalized: false }).eq("session_id", sessionId).eq("is_finalized", true),
+    ]);
 
     const [designUpdate, placementUpdate] = await Promise.all([
       supabase.from("tattoo_designs").update({ is_finalized: true }).eq("id", designId),
@@ -366,17 +422,40 @@ export const useAppStore = create<AppState>()(
     if (designUpdate.error) throw new Error(`Finalize fallback: design update failed — ${designUpdate.error.message}`);
     if (placementUpdate.error) throw new Error(`Finalize fallback: placement update failed — ${placementUpdate.error.message}`);
 
-    // Prune non-finalized siblings so the dashboard sees only the chosen rows.
-    await Promise.all([
-      supabase.from("tattoo_designs").delete().eq("session_id", sessionId).eq("is_finalized", false),
-      supabase.from("placements").delete().eq("session_id", sessionId).eq("is_finalized", false),
-    ]);
+    const { error: sessionError } = await supabase
+      .from("sessions")
+      .update({ status: "completed", completed_at: new Date().toISOString() })
+      .eq("id", sessionId);
+    if (sessionError) throw new Error(`Finalize fallback: session update failed — ${sessionError.message}`);
+    set({ sessionStatus: "completed" });
+  },
+
+  finalizeReworkSession: async (designId) => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+
+    const { error: rpcError } = await supabase.rpc("finalize_rework_session", {
+      p_session_id: sessionId,
+      p_design_id: designId,
+    });
+    if (!rpcError) { set({ sessionStatus: "completed" }); return; }
+
+    console.warn("finalize_rework_session RPC failed — falling back to manual sequence:", rpcError);
+
+    // Unset any previous finalized choice first — only one design can be
+    // finalized at a time, but nothing is ever deleted.
+    await supabase.from("tattoo_designs").update({ is_finalized: false }).eq("session_id", sessionId).eq("is_finalized", true);
+
+    const { error: designError } = await supabase
+      .from("tattoo_designs").update({ is_finalized: true }).eq("id", designId);
+    if (designError) throw new Error(`Finalize fallback: design update failed — ${designError.message}`);
 
     const { error: sessionError } = await supabase
       .from("sessions")
       .update({ status: "completed", completed_at: new Date().toISOString() })
       .eq("id", sessionId);
     if (sessionError) throw new Error(`Finalize fallback: session update failed — ${sessionError.message}`);
+    set({ sessionStatus: "completed" });
   },
 
   hydrateFromSession: async (sessionId) => {
@@ -397,6 +476,8 @@ export const useAppStore = create<AppState>()(
         tattoo_style,
         tattoo_description,
         target_body_area,
+        flow_type,
+        rework_mode,
         status,
         users ( first_name, phone ),
         tattoo_designs ( id, image_url, style_name, pattern_type, iteration, is_finalized ),
@@ -464,12 +545,15 @@ export const useAppStore = create<AppState>()(
       tattooStyle: session.tattoo_style ?? "",
       tattooDescription: session.tattoo_description ?? "",
       targetBodyArea: session.target_body_area ?? "",
+      flowType: (session.flow_type as "ai_design" | "rework" | null) ?? "ai_design",
+      reworkMode: (session.rework_mode as "cover" | "extend" | null) ?? "cover",
       generatedDesigns: latestDesigns,
       selectedDesign: finalizedDesign ?? get().selectedDesign ?? latestDesigns[0] ?? null,
       iterationCount: latestIteration || 0,
       placementText: activePlacement?.placement_text ?? "",
       finalComposite: activePlacement?.final_composite_url ?? null,
       placementDbId: activePlacement?.id ?? null,
+      sessionStatus: (session.status as "active" | "completed" | "abandoned") ?? "active",
       hydratedSessionId: sessionId,
     });
   },
@@ -490,6 +574,8 @@ export const useAppStore = create<AppState>()(
         tattooStyle: state.tattooStyle,
         tattooDescription: state.tattooDescription,
         targetBodyArea: state.targetBodyArea,
+        flowType: state.flowType,
+        reworkMode: state.reworkMode,
         selectedColors: state.selectedColors,
         generatedDesigns: state.generatedDesigns,
         selectedDesigns: state.selectedDesigns,
@@ -499,6 +585,7 @@ export const useAppStore = create<AppState>()(
         placementText: state.placementText,
         finalComposite: state.finalComposite,
         placementDbId: state.placementDbId,
+        sessionStatus: state.sessionStatus,
         hydratedSessionId: state.hydratedSessionId,
       }),
       version: 1,

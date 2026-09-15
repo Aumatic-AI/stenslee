@@ -14,6 +14,13 @@ export interface Database {
         };
         Returns: void;
       };
+      finalize_rework_session: {
+        Args: {
+          p_session_id: string;
+          p_design_id: string;
+        };
+        Returns: void;
+      };
     };
     Tables: {
       users: {
@@ -39,25 +46,37 @@ export interface Database {
           user_id: string | null;
           tattoo_style: string | null;
           tattoo_description: string | null;
+          flow_type: "ai_design" | "rework";
+          rework_source_photo_url: string | null;
+          rework_mode: "cover" | "extend" | null;
           status: "active" | "completed" | "abandoned";
           created_at: string;
           completed_at: string | null;
+          deleted_at: string | null;
         };
         Insert: {
           id: string;
           user_id?: string | null;
           tattoo_style?: string | null;
           tattoo_description?: string | null;
+          flow_type?: "ai_design" | "rework";
+          rework_source_photo_url?: string | null;
+          rework_mode?: "cover" | "extend" | null;
           status?: "active" | "completed" | "abandoned";
           created_at?: string;
           completed_at?: string | null;
+          deleted_at?: string | null;
         };
         Update: {
           user_id?: string | null;
           tattoo_style?: string | null;
           tattoo_description?: string | null;
+          flow_type?: "ai_design" | "rework";
+          rework_source_photo_url?: string | null;
+          rework_mode?: "cover" | "extend" | null;
           status?: "active" | "completed" | "abandoned";
           completed_at?: string | null;
+          deleted_at?: string | null;
         };
       };
       tattoo_designs: {
@@ -69,6 +88,9 @@ export interface Database {
           pattern_type: string | null;
           iteration: number;
           is_finalized: boolean;
+          parent_design_ids: string[];
+          user_instruction: string | null;
+          flash_image_url: string | null;
           created_at: string;
         };
         Insert: {
@@ -79,10 +101,39 @@ export interface Database {
           pattern_type?: string | null;
           iteration?: number;
           is_finalized?: boolean;
+          parent_design_ids?: string[];
+          user_instruction?: string | null;
+          flash_image_url?: string | null;
           created_at?: string;
         };
         Update: {
           is_finalized?: boolean;
+          flash_image_url?: string | null;
+        };
+      };
+      chat_messages: {
+        Row: {
+          id: string;
+          session_id: string;
+          role: "user" | "assistant";
+          content: string | null;
+          image_urls: string[];
+          design_ids: string[];
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          session_id: string;
+          role: "user" | "assistant";
+          content?: string | null;
+          image_urls?: string[];
+          design_ids?: string[];
+          created_at?: string;
+        };
+        Update: {
+          content?: string | null;
+          image_urls?: string[];
+          design_ids?: string[];
         };
       };
       placements: {
