@@ -1,7 +1,5 @@
 # Cleopatra Ink Studio — Project Scope
 
-A simple guide to what this app does and everything it can do. Written for
-anyone — no technical background needed.
 
 ---
 
