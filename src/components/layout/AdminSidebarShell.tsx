@@ -54,6 +54,30 @@ const NAV_ITEMS = [
   },
 ];
 
+// Kept separate from Settings/Designers/etc. — it's the only nav item that
+// carries an unseen-count badge, so render sites check against this href
+// rather than a generic flag on every item.
+const TRASH_HREF = "/studio/admin/trash";
+const TRASH_NAV_ITEM = {
+  href: TRASH_HREF,
+  label: "Recently Deleted",
+  icon: (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+    </svg>
+  ),
+};
+const ALL_NAV_ITEMS = [...NAV_ITEMS, TRASH_NAV_ITEM];
+
+function NavBadge({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <span className="min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-gold text-bg text-[9px] font-mono font-bold flex items-center justify-center leading-none">
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
+
 function isActive(pathname: string, href: string) {
   if (href === "/studio/admin") return pathname === "/studio/admin";
   return pathname.startsWith(href);
@@ -80,6 +104,30 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
   // non-admin/no session. Kept distinct so the splash below only ever shows
   // once, on the very first load — not on every in-app navigation.
   const [admin, setAdmin] = useState<AdminIdentity | null | undefined>(undefined);
+  const [trashCount, setTrashCount] = useState(0);
+
+  // Unseen-count badge for Recently Deleted — re-fetched on every navigation
+  // (not just once at mount) so it clears once the admin has actually opened
+  // that tab and updated their trash_last_viewed_at, and stays accurate if
+  // a designer soft-deletes something else while the admin is elsewhere.
+  useEffect(() => {
+    if (!admin) return;
+    let cancelled = false;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data: staffRow } = await supabase
+        .from("staff").select("trash_last_viewed_at").eq("id", user.id).maybeSingle();
+
+      let query = supabase.from("sessions").select("id", { count: "exact", head: true }).not("deleted_at", "is", null);
+      if (staffRow?.trash_last_viewed_at) query = query.gt("deleted_at", staffRow.trash_last_viewed_at);
+
+      const { count } = await query;
+      if (!cancelled) setTrashCount(count ?? 0);
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [admin, pathname]);
 
   useEffect(() => {
     if (pathname === "/studio/login") return;
@@ -212,7 +260,7 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
           (phone through tablet/split-screen) get the compact top tab bar
           below instead — a fixed 224px rail left too little room for the
           dashboard's content at those widths. Fixed in place; only <main> scrolls. */}
-      <aside className="hidden lg:flex lg:flex-col w-56 flex-shrink-0 min-h-0 border-r border-cleo-border bg-surface/40 px-4 py-6 gap-6 overflow-y-auto">
+      <aside className="hidden lg:flex lg:flex-col w-64 flex-shrink-0 min-h-0 border-r border-cleo-border bg-surface/40 px-4 py-6 gap-6 overflow-y-auto">
         <div className="flex items-center gap-2.5 px-2">
           <div className="w-7 h-7 relative flex-shrink-0">
             <Image src="/cleopatra-logo.svg" alt="Cleopatra" fill className="object-contain" />
@@ -224,7 +272,7 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
         </div>
 
         <nav className="flex flex-col gap-1">
-          {NAV_ITEMS.map((item) => {
+          {ALL_NAV_ITEMS.map((item) => {
             const active = isActive(pathname, item.href);
             return (
               <Link
@@ -237,7 +285,8 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
                 }`}
               >
                 {item.icon}
-                {item.label}
+                <span className="flex-1 whitespace-nowrap">{item.label}</span>
+                {item.href === TRASH_HREF && <NavBadge count={trashCount} />}
               </Link>
             );
           })}
@@ -285,7 +334,7 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
         {/* On phone widths, admin-section pages use the bottom tab bar
             instead — this strip only shows there from tablet width up. */}
         <nav className={`${isAdminSection ? "hidden sm:flex" : "flex"} gap-1.5 px-3 pb-3 overflow-x-auto`}>
-          {NAV_ITEMS.map((item) => {
+          {ALL_NAV_ITEMS.map((item) => {
             const active = isActive(pathname, item.href);
             return (
               <Link
@@ -297,6 +346,7 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
               >
                 {item.icon}
                 {item.label}
+                {item.href === TRASH_HREF && <NavBadge count={trashCount} />}
               </Link>
             );
           })}
@@ -309,7 +359,7 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
       {/* Bottom tab bar — mobile-app style, phone widths, admin section only */}
       {isAdminSection && (
         <nav className="sm:hidden fixed bottom-0 inset-x-0 z-30 bg-surface/95 backdrop-blur-md border-t border-cleo-border flex items-stretch pb-safe">
-          {NAV_ITEMS.map((item) => {
+          {ALL_NAV_ITEMS.map((item) => {
             const active = isActive(pathname, item.href);
             return (
               <Link
@@ -317,7 +367,14 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
                 href={item.href}
                 className={`flex-1 flex flex-col items-center justify-center gap-1 py-2.5 transition-colors ${active ? "text-gold" : "text-muted"}`}
               >
-                {cloneElement(item.icon, { className: "w-5 h-5" })}
+                <span className="relative">
+                  {cloneElement(item.icon, { className: "w-5 h-5" })}
+                  {item.href === TRASH_HREF && trashCount > 0 && (
+                    <span className="absolute -top-1.5 -right-2 min-w-[0.9rem] h-[0.9rem] px-0.5 rounded-full bg-gold text-bg text-[8px] font-mono font-bold flex items-center justify-center leading-none">
+                      {trashCount > 99 ? "99+" : trashCount}
+                    </span>
+                  )}
+                </span>
                 <span className="text-[9px] font-cinzel font-bold uppercase tracking-wide">{item.label}</span>
               </Link>
             );

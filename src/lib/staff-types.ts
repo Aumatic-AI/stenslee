@@ -9,4 +9,5 @@ export interface StaffMember {
   is_active: boolean;
   created_at: string;
   avatar_url?: string | null;
+  trash_last_viewed_at?: string | null;
 }

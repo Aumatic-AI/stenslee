@@ -161,7 +161,6 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
   const [backLabel, setBackLabel] = useState(defaultBackLabel);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [restoring, setRestoring] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [flashUrl, setFlashUrl] = useState<string | null>(null);
   const [flashState, setFlashState] = useState<"idle" | "loading" | "done" | "error">("idle");
@@ -330,17 +329,6 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
     router.push(backUrl);
   }
 
-  async function handleRestore() {
-    setRestoring(true);
-    const { error } = await supabase
-      .from("sessions")
-      .update({ deleted_at: null })
-      .eq("id", sessionId);
-    setRestoring(false);
-    if (error) { setActionError(error.message); return; }
-    setSession((prev) => (prev ? { ...prev, deleted_at: null } : prev));
-  }
-
   return (
     <div className="min-h-[100dvh] bg-bg flex flex-col">
       {/* Header — just Back; everything else lives in the page body now */}
@@ -355,17 +343,11 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
 
       {/* Deleted banner — soft delete only, so this is always recoverable */}
       {session.deleted_at && (
-        <div className="px-4 sm:px-6 py-3 bg-error/10 border-b border-error/30 flex items-center gap-3 flex-wrap">
+        <div className="px-4 sm:px-6 py-3 bg-error/10 border-b border-error/30">
           <p className="text-error text-xs font-mono">
-            This session was deleted on {new Date(session.deleted_at).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric" })}. All data is kept — it&apos;s just hidden from staff lists.
+            This session was deleted on {new Date(session.deleted_at).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric" })}. Viewing read-only — restore or permanently delete it from{" "}
+            <Link href="/studio/admin/trash" className="underline underline-offset-2 hover:text-error/80">Recently Deleted</Link>.
           </p>
-          <button
-            onClick={handleRestore}
-            disabled={restoring}
-            className="ml-auto h-7 px-3 rounded-lg bg-error/90 border border-error text-white font-cinzel font-bold text-[10px] tracking-widest uppercase hover:bg-error transition-colors cursor-pointer disabled:opacity-50 flex-shrink-0"
-          >
-            {restoring ? "Restoring…" : "Restore"}
-          </button>
         </div>
       )}
 
