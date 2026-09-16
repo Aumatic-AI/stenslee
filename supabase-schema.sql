@@ -36,10 +36,14 @@ create table staff (
   is_active   boolean     not null default true,
   last_login  timestamptz,
   deleted_at  timestamptz,
+  -- Last time this admin opened the "Recently Deleted" tab — powers its
+  -- unread-count badge and the per-row "new" highlight. Null means never
+  -- viewed (everything in the trash counts as new). Irrelevant for designers.
+  trash_last_viewed_at timestamptz,
   created_at  timestamptz not null default now()
 );
 
-comment on table staff is 'Studio staff (designers + admin). Auth via Supabase Auth email+password. last_login enforces 24hr session timeout in middleware. deleted_at is a soft-delete marker — non-null means hidden from admin list and blocked from logging in; the row is kept so historical sessions still resolve "designed by X".';
+comment on table staff is 'Studio staff (designers + admin). Auth via Supabase Auth email+password. last_login enforces 24hr session timeout in middleware. deleted_at is a soft-delete marker — non-null means hidden from admin list and blocked from logging in; the row is kept so historical sessions still resolve "designed by X". trash_last_viewed_at tracks when this admin last opened Recently Deleted.';
 
 -- ── 2. USERS (customers) ────────────────────────────────────
 -- Phone-based identification only. No login for customers.
@@ -55,9 +59,13 @@ comment on table users is 'Customer accounts. Identified by phone number. No aut
 -- ── 3. SESSIONS ─────────────────────────────────────────────
 -- One session = one tattoo design journey.
 -- designer_id tracks which staff member handled it.
--- Nothing is ever hard-deleted — finalize keeps every generated variation,
--- and "deleting" a session from the UI only sets deleted_at (same soft-delete
--- idiom as staff.deleted_at above): hidden from staff lists, data kept.
+-- Finalize keeps every generated variation — nothing is pruned there.
+-- "Deleting" a session from the UI (admin or designer) only sets deleted_at
+-- (soft-delete, same idiom as staff.deleted_at above): hidden from staff
+-- lists, data kept. A soft-deleted session is recoverable from the admin's
+-- "Recently Deleted" tab for 30 days, from which an admin can restore it or
+-- permanently (hard) delete it early — see the PURGE JOB section near the
+-- end of this file for what happens if 30 days pass with no action.
 create table sessions (
   id                     text        primary key,
   user_id                uuid        references users(id) on delete set null,
@@ -80,6 +88,9 @@ create index on sessions(user_id);
 create index on sessions(designer_id);
 create index on sessions(status);
 create index on sessions(created_at);
+-- Partial index — only rows actually in the trash need to be found fast by
+-- the Recently Deleted list and the purge job; everything else skips it.
+create index on sessions(deleted_at) where deleted_at is not null;
 
 comment on table sessions is 'One row per tattoo design session. Nothing is ever auto-deleted; deleted_at is a soft-delete marker that only hides a session from staff lists.';
 
@@ -370,10 +381,49 @@ select id, email, 'Studio Admin', 'admin', true
  where email = 'admin@yourstudio.com'           -- ← MATCH YOUR EMAIL
 on conflict (id) do nothing;
 
--- No session cleanup cron — nothing is ever auto-deleted. Sessions are only
--- ever hidden from staff lists via sessions.deleted_at (soft delete); all
--- data is kept permanently. If a cleanup-expired-sessions pg_cron job was
--- scheduled previously, remove it: select cron.unschedule('cleanup-expired-sessions');
+-- ── PURGE JOB — Recently Deleted retention (30 days) ─────────
+-- A session sitting in the trash (deleted_at set, restorable from the
+-- admin's "Recently Deleted" tab) auto-hard-deletes 30 days after being
+-- soft-deleted. This pg_cron job runs daily and ONLY triggers an HTTP call
+-- to the app's own /api/cron/purge-trash route (src/app/api/cron/purge-trash/
+-- route.ts) — that route does the actual work (removes each expired
+-- session's files from the session-assets bucket, then deletes the row,
+-- which cascades to tattoo_designs/placements/chat_messages). The job below
+-- never touches storage or any table directly, on purpose: pg_net can't
+-- call the Storage API, so a job that tried to delete rows via raw SQL here
+-- would silently leave orphaned files behind.
+--
+-- ⚠ REQUIRED SETUP before this does anything: replace YOUR-DEPLOYED-DOMAIN
+-- and YOUR_CRON_SECRET below (the latter must match the CRON_SECRET env var
+-- the route checks), then run this block in the SQL Editor. Until you do,
+-- net.http_post below just fails against a placeholder URL — nothing is
+-- purged and nothing breaks either way.
+--
+-- TO CHECK THIS JOB EXISTS / SEE ITS RUN HISTORY (run any time):
+--   select * from cron.job where jobname = 'purge-expired-trash';
+--   select * from cron.job_run_details
+--     where jobid = (select jobid from cron.job where jobname = 'purge-expired-trash')
+--     order by start_time desc limit 20;
+-- TO REMOVE IT:
+--   select cron.unschedule('purge-expired-trash');
+
+create extension if not exists pg_cron;
+create extension if not exists pg_net;
+
+select cron.schedule(
+  'purge-expired-trash',
+  '0 3 * * *', -- daily at 03:00 UTC
+  $$
+  select net.http_post(
+    url     := 'https://YOUR-DEPLOYED-DOMAIN/api/cron/purge-trash', -- ← REPLACE
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer YOUR_CRON_SECRET'                   -- ← REPLACE
+    ),
+    body    := '{}'::jsonb
+  );
+  $$
+);
 
 -- ── AGGREGATE VIEWS (performance) ────────────────────────────
 -- Let the admin panel ask Postgres for pre-counted totals instead of

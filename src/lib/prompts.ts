@@ -701,15 +701,24 @@ export function buildInitialDesignPrompt(
   style: string,
   hasReferenceImages: boolean,
   colorHexes: string[] = [],
-  targetBodyArea: string = ""
+  targetBodyArea: string = "",
+  referenceCount = 0
 ): string {
   const styleLabel = style || "fine-line black-and-grey";
   const palette = buildPaletteBlock(colorHexes);
   const bodyArea = buildBodyAreaBlock(targetBodyArea);
   const hasColors = colorHexes.length > 0;
 
+  // With more than one reference, call out that THIS variation's Image 1 is
+  // the lead — the caller rotates which reference lands in that slot across
+  // the batch (see rotateReferences in the generate route), so this same
+  // wording, paired with a different Image 1 each time, is what actually
+  // makes a 5-image batch reflect all the references instead of only the
+  // one that happened to be uploaded first every single time.
   const referenceDirective = hasReferenceImages
-    ? `Extract the core motifs, composition, and linework character from the reference images and translate them into this tattoo design.\n- CRITICAL OVERRIDE: DO NOT blindly copy the exact colors or shading style of the reference images! You MUST completely reimagine the reference images in the EXACT colors, palette, and style requested below.`
+    ? referenceCount > 1
+      ? `Extract the core motifs, composition, and linework character from the reference images and translate them into this tattoo design.\n- Multiple reference images were provided. Image 1 is THIS variation's primary inspiration — base the main motif and composition on it, then weave in complementary smaller details from the other reference(s) so the result still feels like part of the same moodboard.\n- CRITICAL OVERRIDE: DO NOT blindly copy the exact colors or shading style of the reference images! You MUST completely reimagine the reference images in the EXACT colors, palette, and style requested below.`
+      : `Extract the core motifs, composition, and linework character from the reference images and translate them into this tattoo design.\n- CRITICAL OVERRIDE: DO NOT blindly copy the exact colors or shading style of the reference images! You MUST completely reimagine the reference images in the EXACT colors, palette, and style requested below.`
     : "";
 
   return `
@@ -978,7 +987,8 @@ export function buildTattooPrompt(
   colorHexes: string[] = [],
   targetBodyArea: string = "",
   isTextTattoo = false,
-  textTattooDetails?: { font: string }
+  textTattooDetails?: { font: string },
+  referenceCount = 0
 ): string {
   if (refinement && refinement.selectedImages.length > 0) {
     if (isTextTattoo) {
@@ -992,7 +1002,7 @@ export function buildTattooPrompt(
   if (isTextTattoo) {
     return buildTextTattooPrompt(description, style, hasReferenceImages, colorHexes, targetBodyArea, textTattooDetails);
   }
-  return buildInitialDesignPrompt(description, style, hasReferenceImages, colorHexes, targetBodyArea);
+  return buildInitialDesignPrompt(description, style, hasReferenceImages, colorHexes, targetBodyArea, referenceCount);
 }
 
 // ── 4. PLACEMENT — Standard mode ────────────────────────────
