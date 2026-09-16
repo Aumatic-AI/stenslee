@@ -19,6 +19,19 @@ type RunResult =
   | { ok: true; url: string }
   | { ok: false; reason: string; taskId?: string; credits?: boolean };
 
+// When there's more than one reference image, rotate which one leads across
+// the parallel generation slots. Otherwise every slot sees the exact same
+// image order and the model consistently favors whichever came first, so a
+// 3-reference batch of 5 ends up looking like "5 versions of reference #1"
+// instead of a mix — paired with buildInitialDesignPrompt's "Image 1 is this
+// variation's primary inspiration" wording, this is what actually makes the
+// batch represent every reference the customer picked, not just the first.
+function rotateReferences(refs: string[], slotIndex: number): string[] {
+  if (refs.length <= 1) return refs;
+  const lead = slotIndex % refs.length;
+  return [refs[lead], ...refs.filter((_, i) => i !== lead)];
+}
+
 async function runOneTask(prompt: string, inputUrls: string[], model: "gpt-image-2-image-to-image" | "nano-banana-pro" = "gpt-image-2-image-to-image"): Promise<RunResult> {
   let taskId: string | undefined;
   try {
@@ -120,7 +133,8 @@ export async function POST(req: NextRequest) {
     Array.isArray(colors) ? (colors as string[]) : [],
     typeof targetBodyArea === "string" ? targetBodyArea : "",
     isTextTattoo as boolean,
-    textTattooFont ? { font: textTattooFont } : undefined
+    textTattooFont ? { font: textTattooFont } : undefined,
+    allRefs.length
   );
 
   // ── Start the job and return immediately ─────────────────────────────
@@ -132,8 +146,12 @@ export async function POST(req: NextRequest) {
 
   void (async () => {
     await Promise.allSettled(
-      Array.from({ length: clampedCount }, (_, index) =>
-        runOneTask(prompt, inputUrls, generationModel)
+      Array.from({ length: clampedCount }, (_, index) => {
+        // Refinement's inputUrls lead with the images being refined, not
+        // the style references — rotation is scoped to the reported bug
+        // (initial-generation batches biased toward the first reference).
+        const slotInputUrls = isRefinement ? inputUrls : rotateReferences(inputUrls, index);
+        return runOneTask(prompt, slotInputUrls, generationModel)
           .then(async (result) => {
             if (!result.ok) {
               console.warn(`[generate] task ${index} failed: ${result.reason}`);
@@ -148,8 +166,8 @@ export async function POST(req: NextRequest) {
               setSlot(sessionId, index, { status: "error", reason: `Image fetch failed: ${(err as Error).message}` });
             }
           })
-          .catch((err) => setSlot(sessionId, index, { status: "error", reason: (err as Error).message }))
-      )
+          .catch((err) => setSlot(sessionId, index, { status: "error", reason: (err as Error).message }));
+      })
     );
   })();
 
