@@ -8,7 +8,7 @@ import type { DesignVariant } from "@/store/app-store";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 import { resolveImageSrc } from "@/lib/image-src";
 import { uploadPhotoDirect, uploadBase64Direct } from "@/lib/browser-upload";
-import { startFlashGeneration } from "@/lib/flash-generation";
+import { startFlashGeneration } from "@/features/flash-isolate/flash-generation";
 import { usePermissionStore } from "@/store/permission-store";
 import { logUsage } from "@/lib/permissions/log-usage";
 

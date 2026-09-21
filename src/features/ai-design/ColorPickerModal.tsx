@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { HexColorPicker, HexColorInput } from "react-colorful";
-import type { TattooColor } from "@/lib/tattoo-colors";
-import { readableTextColor } from "@/lib/tattoo-colors";
+import type { TattooColor } from "@/features/ai-design/tattoo-colors";
+import { readableTextColor } from "@/features/ai-design/tattoo-colors";
 
 interface Props {
   presets: readonly TattooColor[];

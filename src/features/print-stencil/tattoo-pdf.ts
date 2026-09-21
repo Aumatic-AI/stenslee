@@ -1,5 +1,5 @@
 import jsPDF from "jspdf";
-import { resolveImageSrc } from "./image-src";
+import { resolveImageSrc } from "@/lib/image-src";
 
 // ── Page formats + sheet-grid geometry ───────────────────────────────
 export interface PageFormat {

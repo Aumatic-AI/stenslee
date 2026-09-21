@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { createKeiTask, waitForKeiTask, KeiTaskFailedError, KeiCreditsError } from "@/lib/kei-api";
-import { buildReworkPrompt } from "@/lib/prompts-rework";
+import { buildReworkPrompt } from "@/features/rework/prompts";
 import { uploadBase64 } from "@/lib/storage";
 import { startJob, setSlot } from "@/lib/generation-jobs";
 import { requireFeature } from "@/lib/permissions/require-feature";

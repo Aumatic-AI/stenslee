@@ -24,7 +24,7 @@ import {
   type SheetCount,
   type PageFormat,
   type SizeUnit,
-} from "@/lib/tattoo-pdf";
+} from "@/features/print-stencil/tattoo-pdf";
 
 interface TattooInstance {
   id: string;

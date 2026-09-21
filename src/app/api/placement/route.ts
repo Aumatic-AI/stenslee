@@ -1,13 +1,13 @@
 import { NextRequest } from "next/server";
 import { createKeiTask, waitForKeiTask, KeiTaskFailedError, KeiCreditsError } from "@/lib/kei-api";
-// TEST: swapped from "@/lib/prompts" to the minimal-prompt version — see
-// prompts-test.ts. Revert this import to go back to the full-length prompts.
+// TEST: minimal-prompt version, in use in place of the full-length prompts
+// in @/features/ai-design/prompts. Revert this import to go back to those.
 import {
   buildPlacementPrompt,
   buildCompositePrompt,
   buildCompositePromptForComplexAnatomy,
   classifySurface,
-} from "@/lib/prompts-test";
+} from "@/features/placement/prompts";
 import { startJob, setSlot } from "@/lib/generation-jobs";
 import { requireFeature } from "@/lib/permissions/require-feature";
 

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 import { resolveImageSrc } from "@/lib/image-src";
-import ActiveSessionsModal from "@/components/dashboard/ActiveSessionsModal";
+import ActiveSessionsModal from "@/features/admin-dashboard/ActiveSessionsModal";
 import Link from "next/link";
 import { useFeature } from "@/lib/permissions/use-feature";
 import { FeatureLocked } from "@/components/ui/FeatureLocked";

@@ -3,7 +3,7 @@
 // Edit this file to tune what gets sent to the image model.
 // ============================================================
 
-import { resolveColors } from "@/lib/tattoo-colors";
+import { resolveColors } from "@/features/ai-design/tattoo-colors";
 
 // ── Types ────────────────────────────────────────────────────
 

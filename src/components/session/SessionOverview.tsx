@@ -6,8 +6,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 import { resolveBackUrl } from "@/lib/auth-utils";
-import { startFlashGeneration, checkFlashJob, watchFlashGeneration } from "@/lib/flash-generation";
-import TattooPrintStudio from "@/components/print/TattooPrintStudio";
+import { startFlashGeneration, checkFlashJob, watchFlashGeneration } from "@/features/flash-isolate/flash-generation";
+import TattooPrintStudio from "@/features/print-stencil/TattooPrintStudio";
 
 // ── Types ─────────────────────────────────────────────────────
 

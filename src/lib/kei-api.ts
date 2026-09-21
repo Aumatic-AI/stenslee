@@ -1,12 +1,12 @@
 // KEI API client — HTTP calls only, no prompt logic.
-// All prompts live in src/lib/prompts.ts
+// All ai_design prompts live in src/features/ai-design/prompts.ts
 
 const BASE_URL = "https://api.kie.ai";
 const API_KEY = process.env.KEI_API_KEY!;
 
 // Re-export prompt types and builder so existing importers don't break
-export type { RefinementImage, RefinementInfo } from "@/lib/prompts";
-export { buildTattooPrompt } from "@/lib/prompts";
+export type { RefinementImage, RefinementInfo } from "@/features/ai-design/prompts";
+export { buildTattooPrompt } from "@/features/ai-design/prompts";
 
 export interface KeiTaskResult {
   status: "pending" | "processing" | "success" | "failed";
