@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { Viewport } from "next";
 import { Cinzel, Nunito, Space_Mono } from "next/font/google";
 import AdminSidebarShell from "@/components/layout/AdminSidebarShell";
+import PermissionBootstrap from "@/components/layout/PermissionBootstrap";
 import "./globals.css";
 
 const cinzel = Cinzel({
@@ -49,6 +50,7 @@ export default function RootLayout({
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       </head>
       <body className="min-h-full flex flex-col bg-bg text-ink">
+        <PermissionBootstrap />
         <AdminSidebarShell>{children}</AdminSidebarShell>
       </body>
     </html>

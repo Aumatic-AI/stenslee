@@ -10,4 +10,5 @@ export interface StaffMember {
   created_at: string;
   avatar_url?: string | null;
   trash_last_viewed_at?: string | null;
+  organization_id: string;
 }
