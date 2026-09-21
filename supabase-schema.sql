@@ -144,3 +144,79 @@ create trigger set_updated_at before update on organization_feature_overrides
   for each row execute function set_updated_at();
 
 comment on table organization_feature_overrides is 'Per-org exceptions to plan_features. Presence of a row for (org, feature_key) always wins over the plan default -- checked first by getEffectiveAccess() (Task 5)';
+
+-- ── 6. STAFF ────────────────────────────────────────────────
+-- Linked 1:1 to Supabase Auth (auth.users), scoped to one organization.
+create table staff (
+  id                    uuid        primary key references auth.users(id) on delete cascade,
+  organization_id       uuid        not null references organizations(id) on delete cascade,
+  email                 text        not null unique,
+  name                  text        not null,
+  role                  text        not null default 'designer'
+                          check (role in ('admin', 'designer')),
+  is_active             boolean     not null default true,
+  last_login_at         timestamptz,
+  deleted_at            timestamptz,
+  trash_last_viewed_at  timestamptz,
+  avatar_url            text,
+  created_at            timestamptz not null default now(),
+  updated_at            timestamptz not null default now()
+);
+
+create index on staff(organization_id);
+-- Backs the live seat-limit count (designer_seats/admin_seats feature
+-- keys): how many active staff of a given role does this org have right
+-- now. Partial so soft-deleted/inactive rows never bloat the index.
+create index staff_org_role_active_idx on staff(organization_id, role)
+  where deleted_at is null and is_active;
+
+create trigger set_updated_at before update on staff
+  for each row execute function set_updated_at();
+
+comment on table staff is 'Studio staff (designers + admin), scoped to one organization. Auth via Supabase Auth email+password. last_login_at enforces 24hr session timeout in middleware. deleted_at is a soft-delete marker -- non-null means hidden from admin list and blocked from logging in, row kept so historical sessions still resolve "handled by X". Seat limits are checked live via count(*) + staff_org_role_active_idx, never a cached counter.';
+
+-- ── 7. CUSTOMERS ────────────────────────────────────────────
+-- Formerly `users`. Phone-based identification, no login.
+create table customers (
+  id               uuid        primary key default uuid_generate_v4(),
+  organization_id  uuid        not null references organizations(id) on delete cascade,
+  name             text        not null,
+  phone            text        not null,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now(),
+  unique (organization_id, phone)
+);
+
+create index on customers(organization_id);
+
+create trigger set_updated_at before update on customers
+  for each row execute function set_updated_at();
+
+comment on table customers is 'Customer records (formerly `users`, first_name renamed to name). Phone is unique per organization, not globally -- two different studios may each have a customer sharing the same phone number. No auth -- staff acts on their behalf.';
+
+-- ── RLS HELPER FUNCTIONS ─────────────────────────────────────
+create or replace function get_staff_role()
+returns text language sql security definer stable as $$
+  select role from staff where id = auth.uid();
+$$;
+
+create or replace function get_staff_org()
+returns uuid language sql security definer stable as $$
+  select organization_id from staff where id = auth.uid();
+$$;
+
+create or replace function is_admin()
+returns boolean language sql security definer stable as $$
+  select coalesce(
+    (select true from staff where id = auth.uid() and role = 'admin' and is_active = true),
+    false
+  );
+$$;
+
+create or replace function is_designer()
+returns boolean language sql security definer stable as $$
+  select coalesce(
+    (select true from staff where id = auth.uid() and role = 'designer' and is_active = true),
+    false
+  );
+$$;
