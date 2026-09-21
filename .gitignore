@@ -42,3 +42,6 @@ next-env.d.ts
 
 # local-only progress tracker, never committed
 /FEEDBACK_TRACKER.md
+
+# subagent-driven-development scratch workspace (ledgers, briefs, reports)
+/.superpowers/
