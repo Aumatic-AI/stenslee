@@ -3,6 +3,7 @@ import { createKeiTask, waitForKeiTask, KeiTaskFailedError, KeiCreditsError } fr
 import { buildReworkPrompt } from "@/lib/prompts-rework";
 import { uploadBase64 } from "@/lib/storage";
 import { startJob, setSlot } from "@/lib/generation-jobs";
+import { requireFeature } from "@/lib/permissions/require-feature";
 
 // Fetching from KEI works reliably from this server (unlike uploading TO
 // Supabase, which doesn't) — so download the result here but hand the bytes
@@ -54,6 +55,15 @@ export async function POST(req: NextRequest) {
   if (!sessionId || typeof iteration !== "number") {
     return Response.json({ error: "sessionId and iteration are required" }, { status: 400 });
   }
+
+  // Rework has its own on/off toggle, but shares ai_design's usage pool
+  // (per the Permission Registry) -- both must pass. Usage is logged under
+  // "ai_design" (not "rework") after success, so the shared pool's count
+  // actually reflects rework generations too.
+  const reworkCheck = await requireFeature("rework");
+  if (!reworkCheck.ok) return reworkCheck.response;
+  const poolCheck = await requireFeature("ai_design");
+  if (!poolCheck.ok) return poolCheck.response;
 
   const isEdit = editInstruction.trim().length > 0;
 

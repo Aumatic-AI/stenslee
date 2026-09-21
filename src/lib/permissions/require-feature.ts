@@ -139,3 +139,81 @@ export async function requireFeature(
     ),
   };
 }
+
+// designer_seats / admin_seats are NOT usage-log-based like every other
+// limit -- per the schema design, seat limits are checked live against a
+// real headcount (count(*) from staff where ... role = $1 and is_active),
+// never a cached counter or a usage_logs count. get_effective_access() for
+// these two keys is only used for its enabled/limit_value fields here; its
+// used/remaining fields are meaningless for seats and ignored.
+export async function requireSeatAvailable(
+  role: "admin" | "designer"
+): Promise<{ ok: true; organizationId: string } | { ok: false; response: NextResponse }> {
+  const featureKey: FeatureKey = role === "admin" ? "admin_seats" : "designer_seats";
+  const supabase = await createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    return { ok: false, response: NextResponse.json({ error: "Not signed in" }, { status: 401 }) };
+  }
+
+  const { data: staff } = await supabase
+    .from("staff")
+    .select("organization_id, is_active, deleted_at")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (!staff || !staff.is_active || staff.deleted_at || !staff.organization_id) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Staff account is not linked to an organization" }, { status: 403 }),
+    };
+  }
+
+  const { data, error } = await supabase.rpc("get_effective_access", {
+    p_organization_id: staff.organization_id,
+    p_feature_key: featureKey,
+  });
+  if (error || !data || data.length === 0) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Could not verify seat limit — please try again" }, { status: 503 }),
+    };
+  }
+
+  const { enabled, limit_value: limitValue } = data[0] as { enabled: boolean; limit_value: number | null };
+  if (!enabled) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: `${role === "admin" ? "Admin" : "Designer"} accounts are not available on your current plan`, reason: "disabled" },
+        { status: 403 }
+      ),
+    };
+  }
+
+  if (limitValue !== null) {
+    const { count, error: countError } = await supabase
+      .from("staff")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", staff.organization_id)
+      .eq("role", role)
+      .eq("is_active", true)
+      .is("deleted_at", null);
+    if (countError) {
+      return {
+        ok: false,
+        response: NextResponse.json({ error: "Could not verify seat limit — please try again" }, { status: 503 }),
+      };
+    }
+    if ((count ?? 0) >= limitValue) {
+      return {
+        ok: false,
+        response: NextResponse.json(
+          { error: `Seat limit reached — your plan allows ${limitValue} ${role} account${limitValue === 1 ? "" : "s"}`, reason: "limit_reached" },
+          { status: 403 }
+        ),
+      };
+    }
+  }
+
+  return { ok: true, organizationId: staff.organization_id };
+}

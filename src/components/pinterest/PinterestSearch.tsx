@@ -2,6 +2,8 @@
 
 import { useState, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { usePermissionStore } from "@/store/permission-store";
+import { logUsage } from "@/lib/permissions/log-usage";
 
 export interface PinterestPin {
   id: string;
@@ -75,6 +77,11 @@ export default function PinterestSearch({ onAdd, remainingSlots, addedPinIds }: 
       setPins((prev) => (mode === "fresh" ? newPins : [...prev, ...newPins]));
       setBookmark(json.bookmark ?? null);
       setStatus("idle");
+
+      const organizationId = usePermissionStore.getState().staff?.organizationId;
+      if (organizationId) {
+        logUsage({ organizationId, featureKey: "pinterest_search", action: "searched" }).catch(() => {});
+      }
     } catch (err) {
       setError((err as Error).message);
       setStatus("error");

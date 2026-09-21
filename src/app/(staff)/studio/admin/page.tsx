@@ -7,6 +7,8 @@ import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 import { resolveImageSrc } from "@/lib/image-src";
 import ActiveSessionsModal from "@/components/dashboard/ActiveSessionsModal";
 import Link from "next/link";
+import { useFeature } from "@/lib/permissions/use-feature";
+import { FeatureLocked } from "@/components/ui/FeatureLocked";
 
 const WORK_PAGE_SIZE = 12;
 const TREND_DAYS = 14;
@@ -65,6 +67,7 @@ interface WorkItem {
 export default function AdminDashboard() {
   const router = useRouter();
   const supabase = createSupabaseBrowserClient();
+  const dashboardFeature = useFeature("admin_dashboard");
 
   const [loading, setLoading] = useState(true);
   const [kpis, setKpis] = useState<Kpis | null>(null);
@@ -251,6 +254,14 @@ export default function AdminDashboard() {
 
   if (loading) {
     return <DashboardSkeleton />;
+  }
+
+  if (!dashboardFeature.loading && !dashboardFeature.enabled) {
+    return (
+      <div className="min-h-[100dvh] bg-bg flex items-center justify-center px-4">
+        <FeatureLocked title="Dashboard not available" message="The studio dashboard isn't included in your current plan." />
+      </div>
+    );
   }
 
   return (

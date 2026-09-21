@@ -9,6 +9,8 @@ import CameraCapture from "@/components/camera/CameraCapture";
 import TattooPlacementEditor from "@/components/placement/TattooPlacementEditor";
 import { uploadPhotoDirect, uploadBase64Direct } from "@/lib/browser-upload";
 import { resolveImageSrc } from "@/lib/image-src";
+import { usePermissionStore } from "@/store/permission-store";
+import { logUsage } from "@/lib/permissions/log-usage";
 
 // Shown when the AI image service rejects the request for exhausted credits.
 // Direct copy so studio staff immediately know the fix is to top up the AI
@@ -262,6 +264,11 @@ export default function PlacementPage({ params }: { params: Promise<{ sessionId:
 
       const startJson = await res.json();
       if (!res.ok) throw new Error(startJson.error ?? "Placement generation failed to start");
+
+      const organizationId = usePermissionStore.getState().staff?.organizationId;
+      if (organizationId) {
+        logUsage({ organizationId, featureKey: "placement", action: "round_generated", sessionId }).catch(() => {});
+      }
 
       const outcome = await watchPlacementJob(sessionId);
       if ("error" in outcome) {

@@ -3,6 +3,7 @@ import { buildTattooPrompt, createKeiTask, waitForKeiTask, KeiTaskFailedError, K
 import type { RefinementInfo } from "@/lib/kei-api";
 import { uploadBase64 } from "@/lib/storage";
 import { startJob, setSlot } from "@/lib/generation-jobs";
+import { requireFeature } from "@/lib/permissions/require-feature";
 
 // Fetching from KEI works reliably from this server (unlike uploading TO
 // Supabase, which doesn't) — so download the result here but hand the bytes
@@ -76,6 +77,15 @@ export async function POST(req: NextRequest) {
   }
   if (!sessionId || typeof iteration !== "number") {
     return Response.json({ error: "sessionId and iteration are required" }, { status: 400 });
+  }
+
+  // Server-side gate — cannot be bypassed by a hacked frontend, unlike the
+  // cosmetic useFeature() check on the client.
+  const aiDesignCheck = await requireFeature("ai_design");
+  if (!aiDesignCheck.ok) return aiDesignCheck.response;
+  if (isTextTattoo) {
+    const textTattooCheck = await requireFeature("text_tattoo");
+    if (!textTattooCheck.ok) return textTattooCheck.response;
   }
 
   const isRefinement = refineImageUrls.length > 0 && refinementText.trim().length > 0;

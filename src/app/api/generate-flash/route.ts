@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { createKeiTask, waitForKeiTask, KeiTaskFailedError, KeiCreditsError } from "@/lib/kei-api";
 import { startJob, setSlot } from "@/lib/generation-jobs";
+import { requireFeature } from "@/lib/permissions/require-feature";
 
 // Deliberately minimal, same lesson as prompts-rework.ts: a short, direct
 // instruction gets a cleaner isolate than a long list of constraints.
@@ -26,6 +27,13 @@ export async function POST(req: NextRequest) {
   if (!designId || !imageUrl) {
     return Response.json({ error: "designId and imageUrl are required" }, { status: 400 });
   }
+
+  // flash_isolate has its own toggle, but shares ai_design's usage pool
+  // (per the Permission Registry) -- both must pass.
+  const flashCheck = await requireFeature("flash_isolate");
+  if (!flashCheck.ok) return flashCheck.response;
+  const poolCheck = await requireFeature("ai_design");
+  if (!poolCheck.ok) return poolCheck.response;
 
   // Keyed separately from the chat's per-session job so finalizing a design
   // (which can happen mid-chat) never collides with an in-flight chat edit.

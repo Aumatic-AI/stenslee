@@ -9,6 +9,8 @@ import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 import { resolveImageSrc } from "@/lib/image-src";
 import { uploadPhotoDirect, uploadBase64Direct } from "@/lib/browser-upload";
 import { startFlashGeneration } from "@/lib/flash-generation";
+import { usePermissionStore } from "@/store/permission-store";
+import { logUsage } from "@/lib/permissions/log-usage";
 
 const supabase = createSupabaseBrowserClient();
 
@@ -396,6 +398,20 @@ function ChatInner({ sessionId }: { sessionId: string }) {
         throw new Error(json.error ?? "Generation failed to start");
       }
 
+      // Logged under "ai_design" even for rework -- rework shares ai_design's
+      // usage pool per the Permission Registry, so its consumption has to
+      // land in the same counter for the shared limit to mean anything.
+      const organizationId = usePermissionStore.getState().staff?.organizationId;
+      if (organizationId) {
+        logUsage({
+          organizationId,
+          featureKey: "ai_design",
+          action: isFirst ? "batch_generated" : "refinement_round",
+          sessionId,
+          metadata: sessionFlowType === "rework" ? { via: "rework" } : undefined,
+        }).catch(() => {});
+      }
+
       await watchJob(newAssistantMsgId);
     } catch (err) {
       // The request never got a job running — every slot for this message
@@ -483,8 +499,13 @@ function ChatInner({ sessionId }: { sessionId: string }) {
       setFinalizeToast(true);
       setTimeout(() => setFinalizeToast(false), 2500);
       // Kick off the flash/sticker isolate in the background — chat doesn't
-      // wait for or show it, Session Details is where it surfaces.
+      // wait for or show it, Session Details is where it surfaces. Logged
+      // under "ai_design" too -- flash_isolate shares its usage pool.
       startFlashGeneration(sessionId, imageUrl).catch(() => {});
+      const organizationId = usePermissionStore.getState().staff?.organizationId;
+      if (organizationId) {
+        logUsage({ organizationId, featureKey: "ai_design", action: "generated", sessionId, metadata: { via: "flash_isolate" } }).catch(() => {});
+      }
     } catch (err) {
       setError((err as Error).message);
     } finally {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient, createServiceClient } from "@/lib/supabase-server";
 import { uploadBase64 } from "@/lib/storage";
+import { requireSeatAvailable } from "@/lib/permissions/require-feature";
 
 // POST /api/studio/designers — create a new designer (admin only)
 export async function POST(req: NextRequest) {
@@ -11,6 +12,11 @@ export async function POST(req: NextRequest) {
   const service = createServiceClient();
   const { data: requester } = await service.from("staff").select("role").eq("id", user.id).maybeSingle();
   if (requester?.role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  // Server-side seat-limit gate — live headcount against the plan, not a
+  // usage-log check (see requireSeatAvailable's own comment for why).
+  const seatCheck = await requireSeatAvailable("designer");
+  if (!seatCheck.ok) return seatCheck.response;
 
   const { email, name, password } = await req.json();
   if (!email?.trim() || !name?.trim() || !password?.trim()) {
@@ -28,10 +34,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: authError?.message ?? "Failed to create user" }, { status: 500 });
   }
 
-  // Insert staff row
+  // Insert staff row — joins the same organization as the admin creating them.
   const { data: staffRow, error: staffError } = await service
     .from("staff")
-    .insert({ id: authData.user.id, email, name, role: "designer", is_active: true })
+    .insert({ id: authData.user.id, organization_id: seatCheck.organizationId, email, name, role: "designer", is_active: true })
     .select()
     .single();
 

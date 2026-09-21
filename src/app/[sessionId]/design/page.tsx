@@ -15,6 +15,10 @@ import { TypographyGenerator } from "@/components/typography/TypographyGenerator
 import ColorPickerModal from "@/components/design/ColorPickerModal";
 import PreviousDesignsModal from "@/components/design/PreviousDesignsModal";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
+import { usePermissionStore } from "@/store/permission-store";
+import { logUsage } from "@/lib/permissions/log-usage";
+import { useFeature } from "@/lib/permissions/use-feature";
+import { FeatureLocked } from "@/components/ui/FeatureLocked";
 
 const supabase = createSupabaseBrowserClient();
 
@@ -39,6 +43,14 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
   } = useAppStore();
 
   const [hydrating, setHydrating] = useState(false);
+
+  // Hooks must run unconditionally at the top level (not inside the mode
+  // switcher's .map()) — one useFeature() call per mode, referenced by key.
+  const modeFeatures = {
+    ai_design: useFeature("ai_design"),
+    upload_existing: useFeature("upload_existing"),
+    rework: useFeature("rework"),
+  };
 
   // Coming back to the same session already live in the store (e.g. from
   // Chat) — restore the tab/photo/mode instead of resetting to a blank form.
@@ -403,6 +415,7 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
             {
               mode: "ai" as const,
               label: "AI Design",
+              featureKey: "ai_design" as const,
               icon: (
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
@@ -413,6 +426,7 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
             {
               mode: "direct" as const,
               label: "Upload Existing",
+              featureKey: "upload_existing" as const,
               icon: (
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
@@ -423,27 +437,51 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
             {
               mode: "rework" as const,
               label: "Rework",
+              featureKey: "rework" as const,
               icon: (
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L15.6 5.6" />
                 </svg>
               )
             },
-          ].map(({ mode: m, label, icon }) => (
-            <button
-              key={m}
-              onClick={() => setDesignMode(m)}
-              className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-cinzel font-bold text-xs tracking-[0.08em] uppercase transition-all cursor-pointer whitespace-nowrap ${
-                designMode === m
-                  ? "bg-gold text-bg shadow-[0_0_12px_rgba(201,168,76,0.3)]"
-                  : "text-muted hover:text-ink hover:bg-surface-2"
-              }`}
-            >
-              {icon}
-              {label}
-            </button>
-          ))}
+          ].map(({ mode: m, label, featureKey, icon }) => {
+            const feature = modeFeatures[featureKey];
+            const locked = !feature.loading && !feature.enabled;
+            return (
+              <button
+                key={m}
+                onClick={() => { if (!locked) setDesignMode(m); }}
+                disabled={locked}
+                title={locked ? "Not available on your plan" : undefined}
+                className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-cinzel font-bold text-xs tracking-[0.08em] uppercase transition-all whitespace-nowrap ${
+                  locked
+                    ? "text-muted/40 cursor-not-allowed"
+                    : designMode === m
+                    ? "bg-gold text-bg shadow-[0_0_12px_rgba(201,168,76,0.3)] cursor-pointer"
+                    : "text-muted hover:text-ink hover:bg-surface-2 cursor-pointer"
+                }`}
+              >
+                {icon}
+                {label}
+                {locked && (
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                  </svg>
+                )}
+              </button>
+            );
+          })}
         </motion.div>
+
+        {/* Locked-mode fallback — the tab above blocks switching to it, but
+            also cover the case where the store already had this mode picked
+            (e.g. from a previous plan) before the current plan's limits loaded. */}
+        {designMode === "direct" && !modeFeatures.upload_existing.loading && !modeFeatures.upload_existing.enabled && (
+          <FeatureLocked message="Upload Existing isn't included in your current plan." />
+        )}
+        {designMode === "rework" && !modeFeatures.rework.loading && !modeFeatures.rework.enabled && (
+          <FeatureLocked message="Rework isn't included in your current plan." />
+        )}
 
         {/* ── Direct upload card ─────────────────────────────────── */}
         {designMode === "direct" && (
@@ -709,6 +747,10 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
                       const json = await res.json();
                       if (!res.ok) throw new Error(json.error ?? "Enhancement failed");
                       setEnhancedVariations(json.variations);
+                      const organizationId = usePermissionStore.getState().staff?.organizationId;
+                      if (organizationId) {
+                        logUsage({ organizationId, featureKey: "enhance_prompt", action: "requested", sessionId }).catch(() => {});
+                      }
                     } catch (err) {
                       setEnhanceError((err as Error).message);
                     } finally {

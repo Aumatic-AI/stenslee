@@ -9,6 +9,7 @@ import {
   classifySurface,
 } from "@/lib/prompts-test";
 import { startJob, setSlot } from "@/lib/generation-jobs";
+import { requireFeature } from "@/lib/permissions/require-feature";
 
 export const maxDuration = 300;
 
@@ -83,6 +84,9 @@ export async function POST(req: NextRequest) {
   if (!tattooImageUrl && !compositeUrl) {
     return Response.json({ error: "tattooImageUrl or compositeUrl is required" }, { status: 400 });
   }
+
+  const check = await requireFeature("placement");
+  if (!check.ok) return check.response;
 
   let prompt: string;
   let inputUrls: string[];

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireFeature } from "@/lib/permissions/require-feature";
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
 
@@ -39,6 +40,9 @@ export async function POST(req: NextRequest) {
   if (!OPENAI_API_KEY) {
     return NextResponse.json({ error: "OpenAI API key not configured" }, { status: 500 });
   }
+
+  const check = await requireFeature("enhance_prompt");
+  if (!check.ok) return check.response;
 
   const { description, style } = await req.json();
 

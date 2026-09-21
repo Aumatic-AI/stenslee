@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireFeature } from "@/lib/permissions/require-feature";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -79,6 +80,9 @@ function normalize(pin: RawPin): NormalizedPin | null {
 }
 
 export async function GET(req: NextRequest) {
+  const check = await requireFeature("pinterest_search");
+  if (!check.ok) return check.response;
+
   const q = req.nextUrl.searchParams.get("q")?.trim();
   const bookmark = req.nextUrl.searchParams.get("bookmark") ?? undefined;
   const pageSize = Math.min(Number(req.nextUrl.searchParams.get("pageSize") ?? "25"), 50);
