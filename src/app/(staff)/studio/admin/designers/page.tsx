@@ -83,14 +83,14 @@ function DesignersPageInner() {
         .eq("role", "designer")
         .is("deleted_at", null)
         .order("created_at", { ascending: false }),
-      supabase.from("designer_session_counts").select("designer_id, session_count"),
+      supabase.from("designer_session_counts").select("staff_id, session_count"),
     ]);
 
     if (countsRes.error) console.error("designer_session_counts query failed — has the migration in supabase-schema.sql been run?", countsRes.error);
 
     const cm: Record<string, number> = {};
-    (countsRes.data ?? []).forEach((s: { designer_id: string; session_count: number }) => {
-      cm[s.designer_id] = s.session_count;
+    (countsRes.data ?? []).forEach((s: { staff_id: string; session_count: number }) => {
+      cm[s.staff_id] = s.session_count;
     });
 
     const des = (staffRes.data ?? []).map((s) => ({ ...s, session_count: cm[s.id] ?? 0 })) as DesignerRow[];

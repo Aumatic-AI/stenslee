@@ -4,7 +4,7 @@ import { deleteSessionStorage } from "@/lib/session-storage-cleanup";
 
 // DELETE /api/studio/trash/[id] — permanently delete one soft-deleted
 // session (admin only). Removes its files from session-assets, then the
-// row itself, which cascades to tattoo_designs/placements/chat_messages.
+// row itself, which cascades to chat_messages.
 // This is the "Delete" button on the Recently Deleted list — irreversible,
 // unlike the ordinary soft-delete everywhere else in the app.
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

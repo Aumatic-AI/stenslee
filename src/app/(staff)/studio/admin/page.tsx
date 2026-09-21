@@ -34,7 +34,7 @@ interface Kpis {
 
 interface AttentionItem {
   id: string;
-  tattoo_style: string | null;
+  style: string | null;
   created_at: string;
   customerName: string;
 }
@@ -113,7 +113,7 @@ export default function AdminDashboard() {
         .eq("role", "designer").is("deleted_at", null),
       supabase.from("staff").select("id", { count: "exact", head: true })
         .eq("role", "designer").eq("is_active", true).is("deleted_at", null),
-      supabase.from("users").select("id", { count: "exact", head: true }),
+      supabase.from("customers").select("id", { count: "exact", head: true }),
       supabase.from("sessions").select("id", { count: "exact", head: true })
         .eq("status", "active").is("deleted_at", null),
       supabase.from("sessions").select("id", { count: "exact", head: true })
@@ -123,23 +123,22 @@ export default function AdminDashboard() {
       supabase.from("sessions").select("id", { count: "exact", head: true })
         .eq("status", "completed").is("deleted_at", null),
       supabase.from("sessions")
-        .select("id, tattoo_style, created_at, users(first_name)", { count: "exact" })
-        .eq("status", "active").is("designer_id", null).is("deleted_at", null)
+        .select("id, style, created_at, customers(name)", { count: "exact" })
+        .eq("status", "active").is("staff_id", null).is("deleted_at", null)
         .order("created_at", { ascending: true })
         .range(0, 5),
       supabase.from("sessions").select("created_at")
         .is("deleted_at", null).gte("created_at", trendStart.toISOString()),
-      supabase.from("sessions").select("designer_id, designer:designer_id(name)")
-        .eq("status", "completed").not("designer_id", "is", null)
+      supabase.from("sessions").select("staff_id, designer:staff_id(name)")
+        .eq("status", "completed").not("staff_id", "is", null)
         .gte("completed_at", thirtyDaysAgo).is("deleted_at", null),
       supabase.from("sessions")
         .select(`
           id, status, created_at,
-          users(first_name), designer:designer_id(name),
-          tattoo_designs!inner(image_url, style_name),
-          placements(final_composite_url)
+          customers(name), designer:staff_id(name),
+          selected_design_url, selected_design_style, placement_composite_url
         `, { count: "exact" })
-        .eq("tattoo_designs.is_finalized", true)
+        .not("selected_design_url", "is", null)
         .is("deleted_at", null)
         .order("created_at", { ascending: false })
         .range(0, WORK_PAGE_SIZE - 1),
@@ -161,9 +160,9 @@ export default function AdminDashboard() {
     const attentionRows = (attentionRes.data ?? []) as any[];
     setAttentionItems(attentionRows.map((r) => ({
       id: r.id,
-      tattoo_style: r.tattoo_style,
+      style: r.style,
       created_at: r.created_at,
-      customerName: (Array.isArray(r.users) ? r.users[0] : r.users)?.first_name ?? "Unknown",
+      customerName: (Array.isArray(r.customers) ? r.customers[0] : r.customers)?.name ?? "Unknown",
     })));
     setAttentionTotal(attentionRes.count ?? attentionRows.length);
 
@@ -197,9 +196,9 @@ export default function AdminDashboard() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ((leaderboardRes.data ?? []) as any[]).forEach((r) => {
         const designer = Array.isArray(r.designer) ? r.designer[0] : r.designer;
-        const existing = counts.get(r.designer_id);
+        const existing = counts.get(r.staff_id);
         if (existing) existing.count += 1;
-        else counts.set(r.designer_id, { name: designer?.name ?? "Unknown", count: 1 });
+        else counts.set(r.staff_id, { name: designer?.name ?? "Unknown", count: 1 });
       });
       const rows: LeaderboardRow[] = Array.from(counts, ([designerId, v]) => ({ designerId, ...v }))
         .sort((a, b) => b.count - a.count)
@@ -226,11 +225,10 @@ export default function AdminDashboard() {
       .from("sessions")
       .select(`
         id, status, created_at,
-        users(first_name), designer:designer_id(name),
-        tattoo_designs!inner(image_url, style_name),
-        placements(final_composite_url)
+        customers(name), designer:staff_id(name),
+        selected_design_url, selected_design_style, placement_composite_url
       `)
-      .eq("tattoo_designs.is_finalized", true)
+      .not("selected_design_url", "is", null)
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
       .range(work.length, work.length + WORK_PAGE_SIZE - 1);
@@ -304,7 +302,7 @@ export default function AdminDashboard() {
                     <p className="text-ink text-sm font-semibold truncate group-hover:text-gold transition-colors">
                       {s.customerName}
                     </p>
-                    <p className="text-muted text-xs font-mono truncate">{s.tattoo_style || "No style"} · unassigned</p>
+                    <p className="text-muted text-xs font-mono truncate">{s.style || "No style"} · unassigned</p>
                   </div>
                   <p className="text-muted/60 text-[10px] font-mono flex-shrink-0">
                     {new Date(s.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
@@ -556,16 +554,13 @@ function KpiTile({ label, value, href, onClick }: { label: string; value: string
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapWorkRow(r: any): WorkItem {
-  const customer = Array.isArray(r.users) ? r.users[0] : r.users;
+  const customer = Array.isArray(r.customers) ? r.customers[0] : r.customers;
   const designer = Array.isArray(r.designer) ? r.designer[0] : r.designer;
-  const design = Array.isArray(r.tattoo_designs) ? r.tattoo_designs[0] : r.tattoo_designs;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const placement = Array.isArray(r.placements) ? r.placements.find((p: any) => p.final_composite_url) : r.placements;
   return {
     id: r.id,
-    imageUrl: placement?.final_composite_url ?? design?.image_url,
-    styleName: design?.style_name ?? null,
-    customerName: customer?.first_name ?? "Unknown",
+    imageUrl: r.placement_composite_url ?? r.selected_design_url,
+    styleName: r.selected_design_style ?? null,
+    customerName: customer?.name ?? "Unknown",
     designerName: designer?.name ?? "Unassigned",
     status: r.status,
     createdAt: r.created_at,

@@ -24,7 +24,6 @@ const supabase = createSupabaseBrowserClient();
 
 export interface DesignVariant {
   id: string;
-  dbId?: string; // Supabase tattoo_designs.id once persisted
   gradient: string;
   patternType: "mandala" | "geometric" | "tribal" | "floral" | "dark" | "minimal" | "japanese" | "biomech";
   styleName: string;
@@ -71,7 +70,6 @@ interface AppState {
   bodyPhoto: string | null;
   finalComposite: string | null;
   isGeneratingPlacement: boolean;
-  placementDbId: string | null; // placements.id of the most recent saved attempt
 
   // The session row's actual status (from the DB, via hydrateFromSession) —
   // lets a reloaded page tell "already finalized" from "still in progress"
@@ -80,6 +78,11 @@ interface AppState {
 
   // Hydration status — set true after first hydrate attempt for current session
   hydratedSessionId: string | null;
+  // Whether this session already has chat history (generation happened) —
+  // there's no more per-design table to check, so this is read from
+  // chat_messages directly. Used to skip straight to Chat instead of
+  // re-showing the Design form for a session already in progress.
+  hasChatHistory: boolean;
 
   // Actions
   setDesignerId: (id: string | null) => void;
@@ -110,12 +113,11 @@ interface AppState {
   setBodyPhoto: (url: string | null) => void;
   generatePlacement: () => void;
   finishPlacement: (composite: string) => void;
-  setPlacementDbId: (id: string | null) => void;
   // Supabase persistence
-  persistDesigns: (designs: DesignVariant[], meta?: { iteration?: number; parentDesignIds?: string[]; userInstruction?: string }) => Promise<DesignVariant[]>;
-  persistPlacement: (data: { placementText?: string; bodyPhotoUrl?: string; compositeUrl?: string }) => Promise<string | null>;
-  finalizeSession: (designId: string, placementId: string) => Promise<void>;
-  finalizeReworkSession: (designId: string) => Promise<void>;
+  syncSessionDetails: () => Promise<void>;
+  persistSelectedDesign: (design: DesignVariant) => Promise<void>;
+  persistPlacement: (data: { placementText?: string; bodyPhotoUrl?: string; compositeUrl?: string }) => Promise<void>;
+  finalizeSession: () => Promise<void>;
   // Restore state from Supabase for the given session (used after reload)
   hydrateFromSession: (sessionId: string) => Promise<void>;
   reset: () => void;
@@ -152,9 +154,9 @@ const defaultState = {
   bodyPhoto: null,
   finalComposite: null,
   isGeneratingPlacement: false,
-  placementDbId: null as string | null,
   sessionStatus: "active" as "active" | "completed" | "abandoned",
   hydratedSessionId: null as string | null,
+  hasChatHistory: false,
 };
 
 // Resets all design/placement state when starting a fresh session.
@@ -182,8 +184,8 @@ const freshSessionDesignState = {
   bodyPhoto: null,
   finalComposite: null,
   isGeneratingPlacement: false,
-  placementDbId: null,
   sessionStatus: "active" as "active" | "completed" | "abandoned",
+  hasChatHistory: false,
 };
 
 export const useAppStore = create<AppState>()(
@@ -194,41 +196,41 @@ export const useAppStore = create<AppState>()(
   setDesignerId: (id) => set({ designerId: id }),
 
   startSession: async (name, phone) => {
-    // Check if user already exists
+    // Check if customer already exists
     const { data: existing } = await supabase
-      .from("users")
-      .select("id, first_name")
+      .from("customers")
+      .select("id, name")
       .eq("phone", phone)
       .maybeSingle();
 
     if (existing) {
-      // Existing user — do not create a session, let the caller redirect to dashboard
-      set({ customerId: existing.id, customerName: existing.first_name, customerPhone: phone });
+      // Existing customer — do not create a session, let the caller redirect to dashboard
+      set({ customerId: existing.id, customerName: existing.name, customerPhone: phone });
       return { sessionId: "", userId: existing.id, isNew: false };
     }
 
-    // New user — insert and start a session
+    // New customer — insert and start a session
     const id = generateId();
-    const { data: user } = await supabase
-      .from("users")
-      .insert({ first_name: name, phone })
+    const { data: customer } = await supabase
+      .from("customers")
+      .insert({ name, phone })
       .select("id")
       .single();
 
     const { designerId } = get();
-    await supabase.from("sessions").insert({ id, user_id: user?.id ?? null, status: "active", designer_id: designerId ?? null });
+    await supabase.from("sessions").insert({ id, customer_id: customer?.id ?? null, status: "active", staff_id: designerId ?? null });
     set({
       ...freshSessionDesignState,
-      sessionId: id, customerId: user?.id ?? null,
+      sessionId: id, customerId: customer?.id ?? null,
       customerName: name, customerPhone: phone, hydratedSessionId: id,
     });
-    return { sessionId: id, userId: user?.id ?? null, isNew: true };
+    return { sessionId: id, userId: customer?.id ?? null, isNew: true };
   },
 
   startSessionForUser: async (userId, name, phone) => {
     const id = generateId();
     const { designerId } = get();
-    await supabase.from("sessions").insert({ id, user_id: userId, status: "active", designer_id: designerId ?? null });
+    await supabase.from("sessions").insert({ id, customer_id: userId, status: "active", staff_id: designerId ?? null });
     set({
       ...freshSessionDesignState,
       sessionId: id, customerId: userId,
@@ -321,135 +323,58 @@ export const useAppStore = create<AppState>()(
   finishPlacement: (composite) =>
     set({ isGeneratingPlacement: false, finalComposite: composite }),
 
-  setPlacementDbId: (id) => set({ placementDbId: id }),
-
-  persistDesigns: async (designs, meta) => {
-    const { sessionId, tattooStyle, tattooDescription, targetBodyArea, iterationCount, flowType } = get();
-    if (!sessionId) return designs;
-
-    // Keep session row in sync with latest style/description/body-area hint.
-    // Rework sessions don't use target_body_area (the source photo already
-    // shows the placement), so leave it untouched for that flow.
+  // Keep the session row in sync with the latest style/description/body-area
+  // hint. Rework sessions don't use body_area (the source photo already
+  // shows the placement), so leave it untouched for that flow.
+  syncSessionDetails: async () => {
+    const { sessionId, tattooStyle, tattooDescription, targetBodyArea, flowType } = get();
+    if (!sessionId) return;
     await supabase
       .from("sessions")
       .update({
-        tattoo_style: tattooStyle,
-        tattoo_description: tattooDescription,
-        ...(flowType === "ai_design" ? { target_body_area: targetBodyArea || null } : {}),
+        style: tattooStyle,
+        description: tattooDescription,
+        ...(flowType === "ai_design" ? { body_area: targetBodyArea || null } : {}),
       })
       .eq("id", sessionId);
+  },
 
-    const persistable = designs.filter((d) => d.imageUrl);
-    if (persistable.length === 0) return designs;
-
-    const { data, error } = await supabase
-      .from("tattoo_designs")
-      .insert(
-        persistable.map((d) => ({
-          session_id: sessionId,
-          image_url: d.imageUrl!,
-          style_name: d.styleName,
-          // Rework has no pattern-type concept (it's an edit of an existing
-          // tattoo, not a style-based generation) — "mandala" is only ever a
-          // required placeholder value on the caller's side for this flow.
-          pattern_type: flowType === "rework" ? null : d.patternType,
-          iteration: meta?.iteration ?? iterationCount,
-          parent_design_ids: meta?.parentDesignIds ?? [],
-          user_instruction: meta?.userInstruction ?? null,
-        }))
-      )
-      .select("id, image_url");
-
-    if (error || !data) {
-      console.error("persistDesigns failed:", error);
-      return designs;
-    }
-
-    // Map db rows back onto local design objects by image_url
-    return designs.map((d) => {
-      const match = data.find((row: { id: string; image_url: string }) => row.image_url === d.imageUrl);
-      return match ? { ...d, dbId: match.id } : d;
-    });
+  // Writes the chosen design onto the session the moment it's picked, per
+  // the v4 schema: a session only ever has one selected design, tracked as
+  // columns on `sessions` directly rather than a separate table of rows.
+  persistSelectedDesign: async (design) => {
+    const { sessionId } = get();
+    if (!sessionId || !design.imageUrl) return;
+    await supabase
+      .from("sessions")
+      .update({ selected_design_url: design.imageUrl, selected_design_style: design.styleName })
+      .eq("id", sessionId);
   },
 
   persistPlacement: async ({ placementText, bodyPhotoUrl, compositeUrl }) => {
     const { sessionId } = get();
-    if (!sessionId) return null;
-    const { data } = await supabase
-      .from("placements")
-      .insert({
-        session_id: sessionId,
-        placement_text: placementText ?? null,
-        body_photo_url: bodyPhotoUrl ?? null,
-        final_composite_url: compositeUrl ?? null,
-      })
-      .select("id")
-      .single();
-    const id = data?.id ?? null;
-    set({ placementDbId: id });
-    return id;
-  },
-
-  finalizeSession: async (designId, placementId) => {
-    const { sessionId } = get();
     if (!sessionId) return;
-
-    // Fast path: the SQL RPC does mark+prune+complete+analytics atomically.
-    const { error: rpcError } = await supabase.rpc("finalize_session", {
-      p_session_id: sessionId,
-      p_design_id: designId,
-      p_placement_id: placementId,
-    });
-    if (!rpcError) { set({ sessionStatus: "completed" }); return; }
-
-    // RPC failed (most often: live DB still has the pre-hotfix function, so
-    // a user_preferences NOT NULL violation aborts the whole transaction).
-    // The critical path doesn't need the RPC — fall back to plain table ops.
-    // user_preferences is analytics-only; we deliberately skip it here.
-    console.warn("finalize_session RPC failed — falling back to manual sequence:", rpcError);
-
-    // Unset any previous finalized choice first — only one design/placement
-    // can be finalized at a time, but nothing is ever deleted.
-    await Promise.all([
-      supabase.from("tattoo_designs").update({ is_finalized: false }).eq("session_id", sessionId).eq("is_finalized", true),
-      supabase.from("placements").update({ is_finalized: false }).eq("session_id", sessionId).eq("is_finalized", true),
-    ]);
-
-    const [designUpdate, placementUpdate] = await Promise.all([
-      supabase.from("tattoo_designs").update({ is_finalized: true }).eq("id", designId),
-      supabase.from("placements").update({ is_finalized: true }).eq("id", placementId),
-    ]);
-    if (designUpdate.error) throw new Error(`Finalize fallback: design update failed — ${designUpdate.error.message}`);
-    if (placementUpdate.error) throw new Error(`Finalize fallback: placement update failed — ${placementUpdate.error.message}`);
-
-    const { error: sessionError } = await supabase
+    await supabase
       .from("sessions")
-      .update({ status: "completed", completed_at: new Date().toISOString() })
+      .update({
+        placement_text: placementText ?? null,
+        placement_body_photo_url: bodyPhotoUrl ?? null,
+        placement_composite_url: compositeUrl ?? null,
+      })
       .eq("id", sessionId);
-    if (sessionError) throw new Error(`Finalize fallback: session update failed — ${sessionError.message}`);
-    set({ sessionStatus: "completed" });
   },
 
-  finalizeReworkSession: async (designId) => {
+  // The design/placement are already written onto `sessions` the moment
+  // they're chosen (persistSelectedDesign / persistPlacement) — this just
+  // marks the session done.
+  finalizeSession: async () => {
     const { sessionId } = get();
     if (!sessionId) return;
 
-    const { error: rpcError } = await supabase.rpc("finalize_rework_session", {
-      p_session_id: sessionId,
-      p_design_id: designId,
-    });
+    const { error: rpcError } = await supabase.rpc("finalize_session", { p_session_id: sessionId });
     if (!rpcError) { set({ sessionStatus: "completed" }); return; }
 
-    console.warn("finalize_rework_session RPC failed — falling back to manual sequence:", rpcError);
-
-    // Unset any previous finalized choice first — only one design can be
-    // finalized at a time, but nothing is ever deleted.
-    await supabase.from("tattoo_designs").update({ is_finalized: false }).eq("session_id", sessionId).eq("is_finalized", true);
-
-    const { error: designError } = await supabase
-      .from("tattoo_designs").update({ is_finalized: true }).eq("id", designId);
-    if (designError) throw new Error(`Finalize fallback: design update failed — ${designError.message}`);
-
+    console.warn("finalize_session RPC failed — falling back to a plain update:", rpcError);
     const { error: sessionError } = await supabase
       .from("sessions")
       .update({ status: "completed", completed_at: new Date().toISOString() })
@@ -467,21 +392,26 @@ export const useAppStore = create<AppState>()(
       return;
     }
 
-    // Pull session + designs + placements + user in one round-trip
+    // Pull session + customer in one round-trip. Every generated candidate
+    // already lives in chat_messages.image_urls[] (loaded separately by the
+    // chat screen) — this only needs to restore the one design/placement
+    // the session has actually settled on, per the v4 schema's 1-to-1 model.
     const { data: session, error } = await supabase
       .from("sessions")
       .select(`
         id,
-        user_id,
-        tattoo_style,
-        tattoo_description,
-        target_body_area,
+        customer_id,
+        style,
+        description,
+        body_area,
         flow_type,
         rework_mode,
         status,
-        users ( first_name, phone ),
-        tattoo_designs ( id, image_url, style_name, pattern_type, iteration, is_finalized ),
-        placements ( id, placement_text, body_photo_url, final_composite_url, is_finalized, created_at )
+        selected_design_url,
+        selected_design_style,
+        placement_text,
+        placement_composite_url,
+        customers ( name, phone )
       `)
       .eq("id", sessionId)
       .maybeSingle();
@@ -492,69 +422,38 @@ export const useAppStore = create<AppState>()(
       return;
     }
 
-    const user = Array.isArray(session.users) ? session.users[0] : session.users;
-    const designs = (session.tattoo_designs ?? []) as Array<{
-      id: string;
-      image_url: string;
-      style_name: string | null;
-      pattern_type: string | null;
-      iteration: number;
-      is_finalized: boolean;
-    }>;
+    const { count: chatMessageCount } = await supabase
+      .from("chat_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("session_id", sessionId);
 
-    // Use the latest iteration's designs — older iterations were superseded
-    const latestIteration = designs.reduce((max, d) => Math.max(max, d.iteration ?? 1), 0);
-    const latestDesigns = designs
-      .filter((d) => (d.iteration ?? 1) === latestIteration)
-      .map((d, i) => ({
-        id: `db-${d.id}`,
-        dbId: d.id,
-        gradient: defaultGradients[i % defaultGradients.length],
-        patternType: (d.pattern_type as DesignVariant["patternType"]) ?? "mandala",
-        styleName: d.style_name ?? `Variation ${i + 1}`,
-        imageUrl: d.image_url,
-      }));
-
-    const finalizedDesign = latestDesigns.find((d) =>
-      designs.find((row) => row.id === d.dbId && row.is_finalized)
-    );
-
-    const placements = (session.placements ?? []) as Array<{
-      id: string;
-      placement_text: string | null;
-      body_photo_url: string | null;
-      final_composite_url: string | null;
-      is_finalized: boolean;
-      created_at: string;
-    }>;
-    // Newest first — if finalize_session hasn't run yet, multiple in-flight
-    // placement rows can exist; the user expects the latest preview restored.
-    const sortedPlacements = [...placements].sort(
-      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
-    const activePlacement =
-      sortedPlacements.find((p) => p.is_finalized) ??
-      sortedPlacements.find((p) => p.final_composite_url) ??
-      sortedPlacements[0];
+    const customer = Array.isArray(session.customers) ? session.customers[0] : session.customers;
+    const selectedDesign: DesignVariant | null = session.selected_design_url
+      ? {
+          id: `db-${sessionId}`,
+          gradient: defaultGradients[0],
+          patternType: "mandala",
+          styleName: session.selected_design_style ?? "Design",
+          imageUrl: session.selected_design_url,
+        }
+      : null;
 
     set({
       sessionId,
-      customerId: session.user_id ?? null,
-      customerName: user?.first_name ?? get().customerName,
-      customerPhone: user?.phone ?? get().customerPhone,
-      tattooStyle: session.tattoo_style ?? "",
-      tattooDescription: session.tattoo_description ?? "",
-      targetBodyArea: session.target_body_area ?? "",
+      customerId: session.customer_id ?? null,
+      customerName: customer?.name ?? get().customerName,
+      customerPhone: customer?.phone ?? get().customerPhone,
+      tattooStyle: session.style ?? "",
+      tattooDescription: session.description ?? "",
+      targetBodyArea: session.body_area ?? "",
       flowType: (session.flow_type as "ai_design" | "rework" | null) ?? "ai_design",
       reworkMode: (session.rework_mode as "cover" | "extend" | null) ?? "cover",
-      generatedDesigns: latestDesigns,
-      selectedDesign: finalizedDesign ?? get().selectedDesign ?? latestDesigns[0] ?? null,
-      iterationCount: latestIteration || 0,
-      placementText: activePlacement?.placement_text ?? "",
-      finalComposite: activePlacement?.final_composite_url ?? null,
-      placementDbId: activePlacement?.id ?? null,
+      selectedDesign: selectedDesign ?? get().selectedDesign,
+      placementText: session.placement_text ?? "",
+      finalComposite: session.placement_composite_url ?? null,
       sessionStatus: (session.status as "active" | "completed" | "abandoned") ?? "active",
       hydratedSessionId: sessionId,
+      hasChatHistory: (chatMessageCount ?? 0) > 0,
     });
   },
 
@@ -584,9 +483,9 @@ export const useAppStore = create<AppState>()(
         iterationCount: state.iterationCount,
         placementText: state.placementText,
         finalComposite: state.finalComposite,
-        placementDbId: state.placementDbId,
         sessionStatus: state.sessionStatus,
         hydratedSessionId: state.hydratedSessionId,
+        hasChatHistory: state.hasChatHistory,
       }),
       version: 1,
     }

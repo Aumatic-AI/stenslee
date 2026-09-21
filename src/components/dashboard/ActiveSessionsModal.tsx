@@ -10,7 +10,7 @@ const PAGE_SIZE = 20;
 
 interface SessionRow {
   id: string;
-  tattoo_style: string | null;
+  style: string | null;
   created_at: string;
   customerName: string;
   designerName: string;
@@ -32,7 +32,7 @@ export default function ActiveSessionsModal({ onClose }: Props) {
 
     const { data, error: err, count } = await supabase
       .from("sessions")
-      .select("id, tattoo_style, created_at, users(first_name), designer:designer_id(name)", { count: "exact" })
+      .select("id, style, created_at, customers(name), designer:staff_id(name)", { count: "exact" })
       .eq("status", "active")
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
@@ -48,9 +48,9 @@ export default function ActiveSessionsModal({ onClose }: Props) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rows: SessionRow[] = (data as any[]).map((r) => ({
       id: r.id,
-      tattoo_style: r.tattoo_style,
+      style: r.style,
       created_at: r.created_at,
-      customerName: (Array.isArray(r.users) ? r.users[0] : r.users)?.first_name ?? "Unknown",
+      customerName: (Array.isArray(r.customers) ? r.customers[0] : r.customers)?.name ?? "Unknown",
       designerName: (Array.isArray(r.designer) ? r.designer[0] : r.designer)?.name ?? "Unassigned",
     }));
 
@@ -119,7 +119,7 @@ export default function ActiveSessionsModal({ onClose }: Props) {
                   >
                     <div className="flex-1 min-w-0">
                       <p className="text-ink text-sm font-semibold truncate group-hover:text-gold transition-colors">{s.customerName}</p>
-                      <p className="text-muted text-xs font-mono truncate">{s.tattoo_style || "No style"} · by {s.designerName}</p>
+                      <p className="text-muted text-xs font-mono truncate">{s.style || "No style"} · by {s.designerName}</p>
                     </div>
                     <p className="text-muted/60 text-[10px] font-mono flex-shrink-0">
                       {new Date(s.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}

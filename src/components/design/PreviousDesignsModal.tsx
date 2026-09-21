@@ -13,7 +13,7 @@ interface SessionRow {
   id: string;
   customerId: string;
   customerName: string;
-  designerId: string | null;
+  staffId: string | null;
   designerName: string;
 }
 
@@ -151,13 +151,13 @@ export default function PreviousDesignsModal({ onSelect, onClose }: Props) {
       setRole(currentRole);
 
       // Admins see every designer's work; a designer only ever sees their own —
-      // "designer_id" really means "handled by", so this also covers sessions
+      // "staff_id" really means "handled by", so this also covers sessions
       // an admin ran themself.
       let sessionsQuery = supabase
         .from("sessions")
-        .select("id, user_id, designer_id, users(first_name), designer:designer_id(name)")
+        .select("id, customer_id, staff_id, customers(name), designer:staff_id(name)")
         .is("deleted_at", null);
-      if (currentRole === "designer") sessionsQuery = sessionsQuery.eq("designer_id", user.id);
+      if (currentRole === "designer") sessionsQuery = sessionsQuery.eq("staff_id", user.id);
 
       const { data: sessionRows, error: sessionsError } = await sessionsQuery;
       if (cancelled) return;
@@ -166,13 +166,13 @@ export default function PreviousDesignsModal({ onSelect, onClose }: Props) {
       const mapped: SessionRow[] = sessionRows.map((s) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const row = s as any;
-        const customer = Array.isArray(row.users) ? row.users[0] : row.users;
+        const customer = Array.isArray(row.customers) ? row.customers[0] : row.customers;
         const designer = Array.isArray(row.designer) ? row.designer[0] : row.designer;
         return {
           id: row.id,
-          customerId: row.user_id ?? "",
-          customerName: customer?.first_name ?? "Unknown",
-          designerId: row.designer_id ?? null,
+          customerId: row.customer_id ?? "",
+          customerName: customer?.name ?? "Unknown",
+          staffId: row.staff_id ?? null,
           designerName: designer?.name ?? "Unassigned",
         };
       });
@@ -191,7 +191,7 @@ export default function PreviousDesignsModal({ onSelect, onClose }: Props) {
 
   const designerOptions = useMemo<FilterOption[]>(() => {
     const map = new Map<string, string>();
-    sessions.forEach((s) => { if (s.designerId) map.set(s.designerId, s.designerName); });
+    sessions.forEach((s) => { if (s.staffId) map.set(s.staffId, s.designerName); });
     return Array.from(map, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
   }, [sessions]);
 
@@ -200,11 +200,14 @@ export default function PreviousDesignsModal({ onSelect, onClose }: Props) {
   const scopedSessionIds = useMemo(() => {
     return sessions
       .filter((s) => customerFilter === "all" || s.customerId === customerFilter)
-      .filter((s) => role !== "admin" || designerFilter === "all" || s.designerId === designerFilter)
+      .filter((s) => role !== "admin" || designerFilter === "all" || s.staffId === designerFilter)
       .map((s) => s.id);
   }, [sessions, customerFilter, designerFilter, role]);
 
-  // ── Fetch one page of finalized designs for the current filter scope. ──
+  // ── Fetch one page of previously-finished designs for the current filter
+  // scope. A "design" is now just a session with a selected_design_url set
+  // — there's no more separate per-design table (see spec: a session only
+  // ever has one finalized design). ──
   const loadPage = useCallback(async (offset: number, replace: boolean) => {
     if (scopedSessionIds.length === 0) {
       if (replace) setDesigns([]);
@@ -213,10 +216,10 @@ export default function PreviousDesignsModal({ onSelect, onClose }: Props) {
     }
     setLoadingPage(true);
     const { data: designRows, error: designsError } = await supabase
-      .from("tattoo_designs")
-      .select("id, image_url, style_name, session_id, created_at")
-      .in("session_id", scopedSessionIds)
-      .eq("is_finalized", true)
+      .from("sessions")
+      .select("id, selected_design_url, selected_design_style, created_at")
+      .in("id", scopedSessionIds)
+      .not("selected_design_url", "is", null)
       .order("created_at", { ascending: false })
       .range(offset, offset + PAGE_SIZE - 1);
 
@@ -227,11 +230,11 @@ export default function PreviousDesignsModal({ onSelect, onClose }: Props) {
     }
 
     const items: DesignItem[] = designRows.map((d) => {
-      const session = sessionById.get(d.session_id);
+      const session = sessionById.get(d.id);
       return {
         id: d.id,
-        imageUrl: d.image_url,
-        styleName: d.style_name,
+        imageUrl: d.selected_design_url!,
+        styleName: d.selected_design_style,
         customerName: session?.customerName ?? "Unknown",
         designerName: session?.designerName ?? "Unassigned",
       };

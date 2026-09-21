@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
     targetBodyArea = "",
     count = 5,
     textTattooFont,
-    parentDesignIds = [] as string[], // tattoo_designs.id values — for job/lineage tracking, not generation input
+    parentDesignIds = [] as string[], // source image URLs the client selected — for job/lineage tracking, not generation input
   } = await req.json();
 
   if (!description?.trim()) {

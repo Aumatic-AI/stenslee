@@ -11,17 +11,17 @@ import type { StaffMember } from "@/lib/staff-types";
 
 interface CustomerResult {
   id: string;
-  first_name: string;
+  name: string;
   phone: string;
   session_count: number;
 }
 
 interface RecentSession {
   id: string;
-  tattoo_style: string | null;
+  style: string | null;
   status: string;
   created_at: string;
-  users: { first_name: string; phone: string } | null;
+  customers: { name: string; phone: string } | null;
 }
 
 const SESSIONS_PAGE_SIZE = 10;
@@ -40,7 +40,7 @@ export default function DesignerDashboard() {
 
   const [staff, setStaff] = useState<StaffMember | null>(null);
   const [query, setQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<{ id: string; first_name: string; phone: string }[] | null>(null);
+  const [searchResults, setSearchResults] = useState<{ id: string; name: string; phone: string }[] | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerResult | null>(null);
   const [name, setName] = useState("");
   const [newPhone, setNewPhone] = useState("");
@@ -71,8 +71,8 @@ export default function DesignerDashboard() {
 
       const { data: sessions, count } = await supabase
         .from("sessions")
-        .select("id, tattoo_style, status, created_at, users(first_name, phone)", { count: "exact" })
-        .eq("designer_id", staffRow.id)
+        .select("id, style, status, created_at, customers(name, phone)", { count: "exact" })
+        .eq("staff_id", staffRow.id)
         .is("deleted_at", null)
         .order("created_at", { ascending: false })
         .range(0, SESSIONS_PAGE_SIZE - 1);
@@ -91,8 +91,8 @@ export default function DesignerDashboard() {
     setLoadingMore(true);
     const { data } = await supabase
       .from("sessions")
-      .select("id, tattoo_style, status, created_at, users(first_name, phone)")
-      .eq("designer_id", staff.id)
+      .select("id, style, status, created_at, customers(name, phone)")
+      .eq("staff_id", staff.id)
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
       .range(recentSessions.length, recentSessions.length + SESSIONS_PAGE_SIZE - 1);
@@ -150,12 +150,12 @@ export default function DesignerDashboard() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
-  async function handleSelectCustomer(customer: { id: string; first_name: string; phone: string }) {
+  async function handleSelectCustomer(customer: { id: string; name: string; phone: string }) {
     setSelecting(true);
     const { count } = await supabase
       .from("sessions")
       .select("id", { count: "exact", head: true })
-      .eq("user_id", customer.id)
+      .eq("customer_id", customer.id)
       .eq("status", "completed");
     setSelectedCustomer({ ...customer, session_count: count ?? 0 });
     setSelecting(false);
@@ -164,7 +164,7 @@ export default function DesignerDashboard() {
   async function handleStartExisting() {
     if (!selectedCustomer) return;
     setStarting(true);
-    const sessionId = await startSessionForUser(selectedCustomer.id, selectedCustomer.first_name, selectedCustomer.phone);
+    const sessionId = await startSessionForUser(selectedCustomer.id, selectedCustomer.name, selectedCustomer.phone);
     router.push(`/${sessionId}/design`);
   }
 
@@ -297,11 +297,11 @@ export default function DesignerDashboard() {
                   >
                     <div className="w-8 h-8 rounded-full bg-gold/10 border border-gold/20 flex items-center justify-center flex-shrink-0">
                       <span className="font-cinzel text-xs font-black text-gold">
-                        {c.first_name.charAt(0).toUpperCase()}
+                        {c.name.charAt(0).toUpperCase()}
                       </span>
                     </div>
                     <div className="min-w-0">
-                      <p className="text-ink text-sm font-semibold truncate">{c.first_name}</p>
+                      <p className="text-ink text-sm font-semibold truncate">{c.name}</p>
                       <p className="text-muted text-xs font-mono truncate">{c.phone}</p>
                     </div>
                   </button>
@@ -321,11 +321,11 @@ export default function DesignerDashboard() {
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full bg-gold/10 border border-gold/30 flex items-center justify-center flex-shrink-0">
                     <span className="font-cinzel text-base font-black text-gold">
-                      {selectedCustomer.first_name.charAt(0).toUpperCase()}
+                      {selectedCustomer.name.charAt(0).toUpperCase()}
                     </span>
                   </div>
                   <div className="flex-1">
-                    <p className="text-ink font-semibold">{selectedCustomer.first_name}</p>
+                    <p className="text-ink font-semibold">{selectedCustomer.name}</p>
                     <p className="text-muted text-xs font-mono">
                       {selectedCustomer.phone} · {selectedCustomer.session_count} completed {selectedCustomer.session_count === 1 ? "session" : "sessions"}
                     </p>
@@ -429,7 +429,7 @@ export default function DesignerDashboard() {
           ) : (
             <div className="flex flex-col gap-2">
               {recentSessions.map((s, i) => {
-                const customer = Array.isArray(s.users) ? s.users[0] : s.users;
+                const customer = Array.isArray(s.customers) ? s.customers[0] : s.customers;
                 return (
                   <motion.button
                     key={s.id}
@@ -441,12 +441,12 @@ export default function DesignerDashboard() {
                   >
                     <div className="w-8 h-8 rounded-full bg-gold/10 border border-gold/20 flex items-center justify-center flex-shrink-0">
                       <span className="font-cinzel text-xs font-black text-gold">
-                        {customer?.first_name?.charAt(0).toUpperCase() ?? "?"}
+                        {customer?.name?.charAt(0).toUpperCase() ?? "?"}
                       </span>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-ink text-sm font-semibold truncate">{customer?.first_name ?? "Unknown"}</p>
-                      <p className="text-muted text-xs font-mono truncate">{s.tattoo_style || "No style set"}</p>
+                      <p className="text-ink text-sm font-semibold truncate">{customer?.name ?? "Unknown"}</p>
+                      <p className="text-muted text-xs font-mono truncate">{s.style || "No style set"}</p>
                     </div>
                     <div className="text-right flex-shrink-0">
                       <p className={`text-xs font-mono font-bold uppercase ${statusColor(s.status)}`}>{s.status}</p>

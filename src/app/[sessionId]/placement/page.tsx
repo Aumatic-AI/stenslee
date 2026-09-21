@@ -102,8 +102,6 @@ export default function PlacementPage({ params }: { params: Promise<{ sessionId:
     persistPlacement,
     finalizeSession,
     hydrateFromSession,
-    placementDbId,
-    setPlacementDbId,
     sessionStatus,
   } = useAppStore();
 
@@ -183,8 +181,7 @@ export default function PlacementPage({ params }: { params: Promise<{ sessionId:
           try {
             const resultUrl = await uploadBase64Direct(outcome.imageBase64, sessionId, "previews");
             finishPlacement(resultUrl);
-            const id = await persistPlacement({ compositeUrl: resultUrl });
-            setPlacementDbId(id);
+            await persistPlacement({ compositeUrl: resultUrl });
           } catch (err) {
             setError((err as Error).message);
             finishPlacement("");
@@ -278,13 +275,13 @@ export default function PlacementPage({ params }: { params: Promise<{ sessionId:
       const resultUrl = await uploadBase64Direct(outcome.imageBase64, sessionId, "previews");
       finishPlacement(resultUrl);
 
-      // Persist this placement attempt
-      const id = await persistPlacement({
+      // Persist this placement attempt — written onto the session directly,
+      // per the v4 schema (a session only ever has one current placement).
+      await persistPlacement({
         placementText: inputMode === "text" ? placementText : undefined,
         bodyPhotoUrl: bodyPhotoUrl ?? compositeUrl,
         compositeUrl: resultUrl,
       });
-      setPlacementDbId(id);
     } catch (err) {
       setError((err as Error).message);
       finishPlacement("");
@@ -292,13 +289,16 @@ export default function PlacementPage({ params }: { params: Promise<{ sessionId:
   }
 
   async function handleFinalize() {
-    if (!selectedDesign?.dbId || !placementDbId) {
+    if (!selectedDesign?.imageUrl) {
       setError("Unable to finalize — please regenerate and try again.");
       return;
     }
     setFinalizing(true);
     try {
-      await finalizeSession(selectedDesign.dbId, placementDbId);
+      // The design and placement are already written onto the session
+      // (persistSelectedDesign in chat, persistPlacement above) — finalize
+      // just marks the session complete.
+      await finalizeSession();
       setDone(true);
     } catch (err) {
       setError((err as Error).message);
@@ -310,7 +310,6 @@ export default function PlacementPage({ params }: { params: Promise<{ sessionId:
   function handleReset() {
     finishPlacement("");
     setPlacementComposite(null);
-    setPlacementDbId(null);
     setError(null);
   }
 

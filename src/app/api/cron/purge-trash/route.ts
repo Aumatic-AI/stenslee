@@ -6,9 +6,9 @@ import { deleteSessionStorage } from "@/lib/session-storage-cleanup";
 // section in supabase-schema.sql for the pg_cron job that calls this daily.
 // Sessions soft-deleted more than TRASH_RETENTION_DAYS ago get permanently
 // removed: files from session-assets, then the row (cascades to
-// tattoo_designs/placements/chat_messages). This route is the only place
-// that actually touches storage/tables — the cron job itself just triggers
-// this HTTP call, nothing more.
+// chat_messages). This route is the only place that actually touches
+// storage/tables — the cron job itself just triggers this HTTP call,
+// nothing more.
 export const maxDuration = 300;
 
 const TRASH_RETENTION_DAYS = 30;

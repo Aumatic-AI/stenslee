@@ -8,21 +8,16 @@ import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 import type { StaffMember } from "@/lib/staff-types";
 
-interface DesignRow {
-  image_url: string;
-  style_name: string | null;
-  is_finalized: boolean;
-}
-
 interface SessionRow {
   id: string;
-  tattoo_style: string | null;
-  tattoo_description: string | null;
+  style: string | null;
+  description: string | null;
   status: string;
   created_at: string;
   completed_at: string | null;
-  users: { first_name: string; phone: string } | null;
-  tattoo_designs: DesignRow[];
+  customers: { name: string; phone: string } | null;
+  selected_design_url: string | null;
+  selected_design_style: string | null;
 }
 
 function TattooThumb({ url }: { url: string }) {
@@ -278,11 +273,11 @@ export default function DesignerDetailPage({ params }: { params: Promise<{ id: s
         supabase
           .from("sessions")
           .select(`
-            id, tattoo_style, tattoo_description, status, created_at, completed_at,
-            users(first_name, phone),
-            tattoo_designs(image_url, style_name, is_finalized)
+            id, style, description, status, created_at, completed_at,
+            customers(name, phone),
+            selected_design_url, selected_design_style
           `)
-          .eq("designer_id", id)
+          .eq("staff_id", id)
           .is("deleted_at", null)
           .order("created_at", { ascending: false }),
       ]);
@@ -495,7 +490,7 @@ export default function DesignerDetailPage({ params }: { params: Promise<{ id: s
           {[
             { label: "Completed", value: completedSessions.length, color: "text-success" },
             { label: "In Progress", value: activeSessions.length, color: "text-gold" },
-            { label: "Total Designs", value: sessions.reduce((n, s) => n + s.tattoo_designs.length, 0), color: "text-ink" },
+            { label: "Total Designs", value: sessions.filter((s) => s.selected_design_url).length, color: "text-ink" },
           ].map((stat) => (
             <div key={stat.label} className="bg-surface border border-cleo-border rounded-xl p-4 text-center">
               <p className={`font-cinzel text-2xl font-black leading-none ${stat.color}`}>{stat.value}</p>
@@ -518,9 +513,7 @@ export default function DesignerDetailPage({ params }: { params: Promise<{ id: s
           ) : (
             <div className="flex flex-col gap-3">
               {sessions.map((s, i) => {
-                const customer = Array.isArray(s.users) ? s.users[0] : s.users;
-                const designs = Array.isArray(s.tattoo_designs) ? s.tattoo_designs : [];
-                const finalDesign = designs.find((d) => d.is_finalized) ?? designs[0];
+                const customer = Array.isArray(s.customers) ? s.customers[0] : s.customers;
                 const dateLabel = new Date(s.created_at).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
 
                 return (
@@ -534,9 +527,9 @@ export default function DesignerDetailPage({ params }: { params: Promise<{ id: s
                     <div className="p-4 flex gap-4">
                       {/* Design thumbnail */}
                       <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-xl overflow-hidden bg-surface-2 border border-cleo-border flex-shrink-0">
-                        {finalDesign?.image_url ? (
-                          <button type="button" onClick={() => setViewingImage(finalDesign.image_url)} className="w-full h-full cursor-pointer hover:opacity-80 transition-opacity">
-                            <TattooThumb url={finalDesign.image_url} />
+                        {s.selected_design_url ? (
+                          <button type="button" onClick={() => setViewingImage(s.selected_design_url!)} className="w-full h-full cursor-pointer hover:opacity-80 transition-opacity">
+                            <TattooThumb url={s.selected_design_url} />
                           </button>
                         ) : (
                           <div className="w-full h-full flex items-center justify-center">
@@ -549,21 +542,21 @@ export default function DesignerDetailPage({ params }: { params: Promise<{ id: s
                       <div className="flex-1 min-w-0 flex flex-col justify-between">
                         <div className="flex flex-col gap-1">
                           <div className="flex items-start justify-between gap-2">
-                            <p className="text-ink font-semibold truncate">{customer?.first_name ?? "Unknown"}</p>
+                            <p className="text-ink font-semibold truncate">{customer?.name ?? "Unknown"}</p>
                             <span className={`text-[10px] font-mono font-bold uppercase flex-shrink-0 ${statusColor(s.status)}`}>{s.status}</span>
                           </div>
                           {customer?.phone && (
                             <p className="text-muted text-xs font-mono">{customer.phone}</p>
                           )}
-                          {s.tattoo_style && (
-                            <p className="text-gold text-xs font-cinzel font-bold tracking-wider truncate">{s.tattoo_style}</p>
+                          {s.style && (
+                            <p className="text-gold text-xs font-cinzel font-bold tracking-wider truncate">{s.style}</p>
                           )}
-                          {s.tattoo_description && (
-                            <p className="text-muted text-xs line-clamp-1">{s.tattoo_description}</p>
+                          {s.description && (
+                            <p className="text-muted text-xs line-clamp-1">{s.description}</p>
                           )}
                         </div>
                         <div className="flex items-center justify-between gap-2 mt-2">
-                          <p className="text-muted/50 text-[10px] font-mono">{dateLabel} · {designs.length} design{designs.length !== 1 ? "s" : ""}</p>
+                          <p className="text-muted/50 text-[10px] font-mono">{dateLabel}</p>
                           <Link
                             href={`/studio/admin/sessions/${s.id}?from=/studio/admin/designers/${id}`}
                             className="text-[10px] font-cinzel tracking-widest text-gold/60 hover:text-gold uppercase transition-colors"
@@ -573,23 +566,6 @@ export default function DesignerDetailPage({ params }: { params: Promise<{ id: s
                         </div>
                       </div>
                     </div>
-
-                    {/* Design thumbnails strip (if multiple) */}
-                    {designs.length > 1 && (
-                      <div className="border-t border-cleo-border px-4 py-3 flex gap-2 overflow-x-auto">
-                        {designs.map((d, j) => (
-                          <div key={j} className={`w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 border ${d.is_finalized ? "border-gold/50" : "border-cleo-border"}`}>
-                            {d.image_url ? (
-                              <button type="button" onClick={() => setViewingImage(d.image_url!)} className="w-full h-full cursor-pointer hover:opacity-80 transition-opacity block">
-                                <TattooThumb url={d.image_url} />
-                              </button>
-                            ) : (
-                              <div className="w-full h-full bg-surface-2" />
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
                   </motion.div>
                 );
               })}

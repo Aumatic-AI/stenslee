@@ -42,19 +42,21 @@ function TattooThumb({ url, alt }: { url: string; alt: string }) {
 }
 
 interface UserProfile {
-  first_name: string;
+  name: string;
   phone: string;
   created_at: string;
 }
 
 interface CompletedSession {
   id: string;
-  tattoo_style: string | null;
-  tattoo_description: string | null;
+  style: string | null;
+  description: string | null;
   flow_type: "ai_design" | "rework";
   completed_at: string;
-  design: { image_url: string; style_name: string | null } | null;
-  placement: { placement_text: string | null; final_composite_url: string | null } | null;
+  selectedDesignUrl: string | null;
+  selectedDesignStyle: string | null;
+  placementText: string | null;
+  placementCompositeUrl: string | null;
   // Rework only — the original photo of the existing tattoo, from the first
   // chat turn (there's no dedicated column for it, see SessionOverview).
   sourcePhoto: string | null;
@@ -64,8 +66,8 @@ type HistoryFilter = "all" | "ai_design" | "rework";
 
 interface ActiveSession {
   id: string;
-  tattoo_style: string | null;
-  tattoo_description: string | null;
+  style: string | null;
+  description: string | null;
   created_at: string;
   hasDesign: boolean;
 }
@@ -147,7 +149,7 @@ function CustomerDashboardInner() {
         .from("staff").select("role").eq("id", authUser.id).maybeSingle();
       const role = staffRow?.role as "admin" | "designer" | undefined ?? null;
       // Whoever starts the session (admin or designer) is who handled it —
-      // designer_id is really "handled by", not designer-only. Without this,
+      // staff_id is really "handled by", not designer-only. Without this,
       // a session started by an admin here would save with no staff
       // attached at all and show "Unassigned" in the session details.
       setDesignerId(authUser.id);
@@ -160,26 +162,26 @@ function CustomerDashboardInner() {
 
       const [userRes, sessionsRes, activeRes] = await Promise.all([
         supabase
-          .from("users")
-          .select("first_name, phone, created_at")
+          .from("customers")
+          .select("name, phone, created_at")
           .eq("id", userId)
           .maybeSingle(),
         supabase
           .from("sessions")
           .select(`
-            id, tattoo_style, tattoo_description, flow_type, completed_at,
-            tattoo_designs!inner(image_url, style_name),
-            placements(placement_text, final_composite_url)
+            id, style, description, flow_type, completed_at,
+            selected_design_url, selected_design_style,
+            placement_text, placement_composite_url
           `)
-          .eq("user_id", userId)
+          .eq("customer_id", userId)
           .eq("status", "completed")
-          .eq("tattoo_designs.is_finalized", true)
+          .not("selected_design_url", "is", null)
           .is("deleted_at", null)
           .order("completed_at", { ascending: false }),
         supabase
           .from("sessions")
-          .select("id, tattoo_style, tattoo_description, created_at, tattoo_designs(id)")
-          .eq("user_id", userId)
+          .select("id, style, description, created_at, selected_design_url")
+          .eq("customer_id", userId)
           .eq("status", "active")
           .is("deleted_at", null)
           .order("created_at", { ascending: false }),
@@ -193,15 +195,14 @@ function CustomerDashboardInner() {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const mapped: CompletedSession[] = rawSessions.map((s: any) => ({
           id: s.id,
-          tattoo_style: s.tattoo_style,
-          tattoo_description: s.tattoo_description,
+          style: s.style,
+          description: s.description,
           flow_type: s.flow_type ?? "ai_design",
           completed_at: s.completed_at,
-          design: Array.isArray(s.tattoo_designs) ? s.tattoo_designs[0] ?? null : s.tattoo_designs,
-          placement: Array.isArray(s.placements)
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            ? s.placements.find((p: any) => p.final_composite_url) ?? s.placements[0] ?? null
-            : s.placements,
+          selectedDesignUrl: s.selected_design_url,
+          selectedDesignStyle: s.selected_design_style,
+          placementText: s.placement_text,
+          placementCompositeUrl: s.placement_composite_url,
           sourcePhoto: null,
         }));
 
@@ -236,10 +237,10 @@ function CustomerDashboardInner() {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const mappedActive: ActiveSession[] = rawActive.map((s: any) => ({
           id: s.id,
-          tattoo_style: s.tattoo_style,
-          tattoo_description: s.tattoo_description,
+          style: s.style,
+          description: s.description,
           created_at: s.created_at,
-          hasDesign: Array.isArray(s.tattoo_designs) ? s.tattoo_designs.length > 0 : !!s.tattoo_designs,
+          hasDesign: !!s.selected_design_url,
         }));
         setActiveSessions(mappedActive);
       }
@@ -253,13 +254,13 @@ function CustomerDashboardInner() {
   async function handleNewTattoo() {
     if (!profile) return;
     setStartingSession(true);
-    const sessionId = await startSessionForUser(userId, profile.first_name, profile.phone);
+    const sessionId = await startSessionForUser(userId, profile.name, profile.phone);
     router.push(`/${sessionId}/design`);
   }
 
   function openEditProfile() {
     if (!profile) return;
-    setEditName(profile.first_name);
+    setEditName(profile.name);
     setEditPhone(profile.phone);
     setSaveError("");
     setEditingProfile(true);
@@ -275,8 +276,8 @@ function CustomerDashboardInner() {
     setSavingProfile(true);
     setSaveError("");
     const { error } = await supabase
-      .from("users")
-      .update({ first_name: trimmedName, phone: editPhone })
+      .from("customers")
+      .update({ name: trimmedName, phone: editPhone })
       .eq("id", userId);
 
     if (error) {
@@ -290,7 +291,7 @@ function CustomerDashboardInner() {
       return;
     }
 
-    setProfile({ ...profile, first_name: trimmedName, phone: editPhone });
+    setProfile({ ...profile, name: trimmedName, phone: editPhone });
     setSavingProfile(false);
     setEditingProfile(false);
   }
@@ -351,11 +352,11 @@ function CustomerDashboardInner() {
           <div className="flex items-center gap-3 sm:gap-5">
             <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-gold/10 border border-gold/30 flex items-center justify-center flex-shrink-0">
               <span className="font-cinzel text-xl sm:text-2xl font-black text-gold">
-                {profile?.first_name.charAt(0).toUpperCase()}
+                {profile?.name.charAt(0).toUpperCase()}
               </span>
             </div>
             <div className="flex flex-col gap-0.5 sm:gap-1 min-w-0">
-              <h1 className="font-cinzel text-base sm:text-xl font-black text-ink tracking-wide truncate">{profile?.first_name}</h1>
+              <h1 className="font-cinzel text-base sm:text-xl font-black text-ink tracking-wide truncate">{profile?.name}</h1>
               <p className="text-muted text-xs sm:text-sm font-mono truncate">{profile?.phone}</p>
               <p className="text-muted/60 text-[10px] sm:text-xs font-mono tracking-widest">MEMBER SINCE {memberYear}</p>
             </div>
@@ -449,10 +450,10 @@ function CustomerDashboardInner() {
                     <div className="w-2 h-2 rounded-full bg-gold flex-shrink-0 animate-pulse" />
                     <div className="flex-1 min-w-0">
                       <p className="font-cinzel text-xs font-bold tracking-[0.1em] text-ink uppercase truncate">
-                        {session.tattoo_style ?? "Custom Design"}
+                        {session.style ?? "Custom Design"}
                       </p>
-                      {session.tattoo_description && (
-                        <p className="text-muted text-xs truncate">{session.tattoo_description}</p>
+                      {session.description && (
+                        <p className="text-muted text-xs truncate">{session.description}</p>
                       )}
                       <p className="text-muted/50 text-[10px] font-mono mt-0.5">Started {dateLabel}</p>
                     </div>
@@ -521,8 +522,8 @@ function CustomerDashboardInner() {
             <div className="flex flex-col gap-4">
               {filteredSessions.map((session, i) => {
                 const isRework = session.flow_type === "rework";
-                const designUrl = session.design?.image_url;
-                const bodyUrl = session.placement?.final_composite_url;
+                const designUrl = session.selectedDesignUrl ?? undefined;
+                const bodyUrl = session.placementCompositeUrl ?? undefined;
                 const dateLabel = new Date(session.completed_at).toLocaleDateString("en-US", {
                   year: "numeric", month: "short", day: "numeric",
                 });
@@ -564,7 +565,7 @@ function CustomerDashboardInner() {
                         <div className="flex flex-col gap-1.5">
                           <div className="flex items-center gap-1.5 min-w-0">
                             <span className="font-cinzel text-xs font-bold tracking-[0.15em] text-gold uppercase truncate">
-                              {session.tattoo_style ?? session.design?.style_name ?? "Custom Design"}
+                              {session.style ?? session.selectedDesignStyle ?? "Custom Design"}
                             </span>
                             {isRework && (
                               <span className="text-[9px] font-mono uppercase tracking-wider bg-gold/10 text-gold border border-gold/30 px-1.5 py-0.5 rounded-full flex-shrink-0">
@@ -572,16 +573,16 @@ function CustomerDashboardInner() {
                               </span>
                             )}
                           </div>
-                          {session.tattoo_description && (
-                            <p className="text-ink text-sm leading-snug line-clamp-2">{session.tattoo_description}</p>
+                          {session.description && (
+                            <p className="text-ink text-sm leading-snug line-clamp-2">{session.description}</p>
                           )}
-                          {session.placement?.placement_text && (
+                          {session.placementText && (
                             <p className="text-muted text-xs flex items-center gap-1.5">
                               <svg className="w-3 h-3 text-gold/60 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a2 2 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                               </svg>
-                              {session.placement.placement_text}
+                              {session.placementText}
                             </p>
                           )}
                         </div>

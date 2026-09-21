@@ -11,7 +11,7 @@ const RETENTION_DAYS = 30;
 
 interface TrashRow {
   id: string;
-  tattoo_style: string | null;
+  style: string | null;
   deleted_at: string;
   customerName: string;
   designerName: string;
@@ -47,13 +47,13 @@ export default function TrashPage() {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapRow = useCallback((r: any, cutoff: string | null): TrashRow => {
-    const customer = Array.isArray(r.users) ? r.users[0] : r.users;
+    const customer = Array.isArray(r.customers) ? r.customers[0] : r.customers;
     const designer = Array.isArray(r.designer) ? r.designer[0] : r.designer;
     return {
       id: r.id,
-      tattoo_style: r.tattoo_style,
+      style: r.style,
       deleted_at: r.deleted_at,
-      customerName: customer?.first_name ?? "Unknown",
+      customerName: customer?.name ?? "Unknown",
       designerName: designer?.name ?? "Unassigned",
       isNew: cutoff ? new Date(r.deleted_at).getTime() > new Date(cutoff).getTime() : true,
     };
@@ -62,7 +62,7 @@ export default function TrashPage() {
   const loadPage = useCallback(async (offset: number, cutoff: string | null) => {
     const { data, count } = await supabase
       .from("sessions")
-      .select("id, tattoo_style, deleted_at, users(first_name), designer:designer_id(name)", { count: "exact" })
+      .select("id, style, deleted_at, customers(name), designer:staff_id(name)", { count: "exact" })
       .not("deleted_at", "is", null)
       .order("deleted_at", { ascending: false })
       .range(offset, offset + PAGE_SIZE - 1);
@@ -115,18 +115,18 @@ export default function TrashPage() {
     let cancelled = false;
     setSearching(true);
     (async () => {
-      const { data: matchingUsers } = await supabase
-        .from("users").select("id").ilike("first_name", `%${q}%`);
-      const userIds = (matchingUsers ?? []).map((u) => u.id);
-      if (userIds.length === 0) {
+      const { data: matchingCustomers } = await supabase
+        .from("customers").select("id").ilike("name", `%${q}%`);
+      const customerIds = (matchingCustomers ?? []).map((c) => c.id);
+      if (customerIds.length === 0) {
         if (!cancelled) { setSearchResults([]); setSearching(false); }
         return;
       }
       const { data } = await supabase
         .from("sessions")
-        .select("id, tattoo_style, deleted_at, users(first_name), designer:designer_id(name)")
+        .select("id, style, deleted_at, customers(name), designer:staff_id(name)")
         .not("deleted_at", "is", null)
-        .in("user_id", userIds)
+        .in("customer_id", customerIds)
         .order("deleted_at", { ascending: false });
       if (cancelled) return;
       setSearchResults((data ?? []).map((r) => mapRow(r, lastViewedAt)));
@@ -259,7 +259,7 @@ export default function TrashPage() {
                     {r.isNew && <span className="w-1.5 h-1.5 rounded-full bg-gold flex-shrink-0" title="New since your last visit" />}
                     <div className="min-w-0">
                       <p className="text-ink font-semibold truncate group-hover:text-gold transition-colors">{r.customerName}</p>
-                      <p className="text-muted text-xs font-mono truncate">{r.tattoo_style || "No style"} · by {r.designerName}</p>
+                      <p className="text-muted text-xs font-mono truncate">{r.style || "No style"} · by {r.designerName}</p>
                     </div>
                   </Link>
 

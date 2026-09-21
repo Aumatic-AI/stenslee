@@ -4,6 +4,7 @@ import { Suspense, use, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { useAppStore } from "@/store/app-store";
+import type { DesignVariant } from "@/store/app-store";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 import { resolveImageSrc } from "@/lib/image-src";
 import { uploadPhotoDirect, uploadBase64Direct } from "@/lib/browser-upload";
@@ -16,7 +17,6 @@ interface ChatMessage {
   role: "user" | "assistant";
   content: string | null;
   image_urls: string[];
-  design_ids: string[];
   created_at: string;
 }
 
@@ -62,12 +62,15 @@ function ChatInner({ sessionId }: { sessionId: string }) {
     tattooStyle, tattooDescription, targetBodyArea, selectedColors, referenceImages,
     isTextTattoo, textTattooFont,
     pendingGeneration, setPendingGeneration,
-    persistDesigns, selectDesign, finalizeReworkSession,
+    syncSessionDetails, persistSelectedDesign, selectDesign, finalizeSession,
   } = useAppStore();
 
   const [loading, setLoading] = useState(true);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [finalizedIds, setFinalizedIds] = useState<Set<string>>(new Set());
+  // The session's currently-selected design URL (if any) — a session only
+  // ever has one, per the v4 schema, tracked as a column on `sessions`
+  // rather than a per-design "is_finalized" flag.
+  const [finalizedUrl, setFinalizedUrl] = useState<string | null>(null);
   const [finalizeToast, setFinalizeToast] = useState(false);
   // Authoritative session context — read from the DB, not just the in-memory
   // store, so reopening a session later (e.g. "Continue Design" from history)
@@ -84,11 +87,11 @@ function ChatInner({ sessionId }: { sessionId: string }) {
   const [pendingSlots, setPendingSlots] = useState<Record<string, PendingSlot[]>>({});
   const [error, setError] = useState<string | null>(null);
   const [finalizing, setFinalizing] = useState<string | null>(null);
-  const [confirmingUse, setConfirmingUse] = useState<{ id: string; url: string } | null>(null);
-  const [viewingId, setViewingId] = useState<string | null>(null);
-  // Plain reference photos (uploaded/selected source images) aren't tied to a
-  // design id, so they get their own view-only lightbox instead of the
-  // Select/Use-this one below, which only makes sense for generated results.
+  const [confirmingUse, setConfirmingUse] = useState<string | null>(null);
+  const [viewingUrl, setViewingUrl] = useState<string | null>(null);
+  // Plain reference photos (uploaded/selected source images) get their own
+  // view-only lightbox instead of the Select/Use-this one below, which only
+  // makes sense for generated results.
   const [viewingRawUrl, setViewingRawUrl] = useState<string | null>(null);
 
   const didKickoffRef = useRef(false);
@@ -107,26 +110,19 @@ function ChatInner({ sessionId }: { sessionId: string }) {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  function findImageUrl(designId: string): string | undefined {
-    for (const m of messages) {
-      const idx = m.design_ids.indexOf(designId);
-      if (idx !== -1) return m.image_urls[idx];
-    }
-    return undefined;
-  }
-
   // Every design image across the whole chat thread, in the order they
   // appear — prev/next in the lightbox walks this full list, not just the
-  // batch the currently-open image came from.
-  function allDesignIds(): string[] {
-    return messages.flatMap((m) => m.design_ids);
+  // batch the currently-open image came from. Image URLs are the identity
+  // now (there's no more per-design row/id).
+  function allImageUrls(): string[] {
+    return messages.flatMap((m) => m.image_urls);
   }
 
   // Stops at the ends — no wraparound from last back to first.
   function viewAdjacent(direction: 1 | -1) {
-    setViewingId((current) => {
+    setViewingUrl((current) => {
       if (!current) return current;
-      const all = allDesignIds();
+      const all = allImageUrls();
       const idx = all.indexOf(current);
       const nextIdx = idx + direction;
       if (idx === -1 || nextIdx < 0 || nextIdx >= all.length) return current;
@@ -136,16 +132,16 @@ function ChatInner({ sessionId }: { sessionId: string }) {
 
   // Keyboard nav for the lightbox
   useEffect(() => {
-    if (!viewingId) return;
+    if (!viewingUrl) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setViewingId(null);
+      if (e.key === "Escape") setViewingUrl(null);
       if (e.key === "ArrowRight") viewAdjacent(1);
       if (e.key === "ArrowLeft") viewAdjacent(-1);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewingId]);
+  }, [viewingUrl]);
 
   // ── Load session context + full chat transcript ──────────────
   useEffect(() => {
@@ -153,25 +149,26 @@ function ChatInner({ sessionId }: { sessionId: string }) {
     async function load() {
       const { data: session } = await supabase
         .from("sessions")
-        .select("flow_type, rework_mode, tattoo_style")
+        .select("flow_type, rework_mode, style, selected_design_url")
         .eq("id", sessionId)
         .maybeSingle();
       if (!cancelled && session) {
         setSessionFlowType((session.flow_type as "ai_design" | "rework" | null) ?? flowType);
         setSessionReworkMode((session.rework_mode as "cover" | "extend" | null) ?? reworkMode);
-        setSessionStyle(session.tattoo_style ?? tattooStyle);
+        setSessionStyle(session.style ?? tattooStyle);
+        setFinalizedUrl(session.selected_design_url ?? null);
       }
 
-      const [chatRes, designsRes] = await Promise.all([
-        supabase.from("chat_messages").select("id, role, content, image_urls, design_ids, created_at").eq("session_id", sessionId).order("created_at", { ascending: true }),
-        supabase.from("tattoo_designs").select("id, is_finalized").eq("session_id", sessionId),
-      ]);
+      const { data: chatRows } = await supabase
+        .from("chat_messages")
+        .select("id, role, content, image_urls, created_at")
+        .eq("session_id", sessionId)
+        .order("created_at", { ascending: true });
 
       if (cancelled) return;
 
-      const loadedMessages: ChatMessage[] = chatRes.data ?? [];
+      const loadedMessages: ChatMessage[] = chatRows ?? [];
       setMessages(loadedMessages);
-      setFinalizedIds(new Set((designsRes.data ?? []).filter((d) => d.is_finalized).map((d) => d.id)));
       setLoading(false);
 
       if (editTargetId) {
@@ -214,7 +211,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
             ),
           }));
           setSending(true);
-          watchJob(lastMessage.id, status.iteration!);
+          watchJob(lastMessage.id);
         }
       }
     }
@@ -246,10 +243,9 @@ function ChatInner({ sessionId }: { sessionId: string }) {
   // assistant message as it lands. Every slot always ends in "done" (real
   // image) or "error" (visible tile + retry) — the loop never exits leaving
   // a slot stuck on "loading" with nothing shown for it. ─────────
-  async function watchJob(assistantMessageId: string, iteration: number) {
+  async function watchJob(assistantMessageId: string) {
     const prefix = sessionFlowType === "rework" ? "rework" : "designs";
     const imageUrls: string[] = messages.find((m) => m.id === assistantMessageId)?.image_urls.slice() ?? [];
-    const designIds: string[] = messages.find((m) => m.id === assistantMessageId)?.design_ids.slice() ?? [];
 
     let notFoundStreak = 0;
     let networkErrorStreak = 0;
@@ -304,16 +300,10 @@ function ChatInner({ sessionId }: { sessionId: string }) {
 
         try {
           const imageUrl = await uploadBase64Direct(slot.imageBase64, sessionId, prefix);
-          const [persisted] = await persistDesigns(
-            [{ id: `kei-${iteration}-${i}`, imageUrl, gradient: "", patternType: "mandala", styleName: `Variation ${i + 1}` }],
-            { iteration }
-          );
-          const designId = persisted.dbId ?? persisted.id;
-          imageUrls.push(persisted.imageUrl!);
-          designIds.push(designId);
+          imageUrls.push(imageUrl);
 
-          await supabase.from("chat_messages").update({ image_urls: imageUrls, design_ids: designIds }).eq("id", assistantMessageId);
-          setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? { ...m, image_urls: [...imageUrls], design_ids: [...designIds] } : m)));
+          await supabase.from("chat_messages").update({ image_urls: imageUrls }).eq("id", assistantMessageId);
+          setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? { ...m, image_urls: [...imageUrls] } : m)));
           setSlot(assistantMessageId, i, { status: "done" });
         } catch (err) {
           setSlot(assistantMessageId, i, { status: "error", reason: `Failed to save: ${(err as Error).message}` });
@@ -335,8 +325,13 @@ function ChatInner({ sessionId }: { sessionId: string }) {
     setError(null);
     processedSlotsRef.current = new Set();
 
-    const editSourceUrls = editSourceIds.map(findImageUrl).filter((u): u is string => !!u);
+    // Selection identity is the image URL itself now — no separate design id.
+    const editSourceUrls = editSourceIds;
     const iteration = messages.filter((m) => m.role === "assistant").length + 1;
+
+    // Keep the session row in sync with the latest style/description before
+    // starting generation (was previously done per-image inside persistDesigns()).
+    await syncSessionDetails();
 
     let assistantMsgId: string | null = null;
     try {
@@ -349,7 +344,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
 
       const { data: assistantMsg, error: assistantMsgErr } = await supabase
         .from("chat_messages")
-        .insert({ session_id: sessionId, role: "assistant", content: null, image_urls: [], design_ids: [] })
+        .insert({ session_id: sessionId, role: "assistant", content: null, image_urls: [] })
         .select()
         .single();
       if (assistantMsgErr) throw new Error(`Couldn't start the reply: ${assistantMsgErr.message}`);
@@ -401,7 +396,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
         throw new Error(json.error ?? "Generation failed to start");
       }
 
-      await watchJob(newAssistantMsgId, iteration);
+      await watchJob(newAssistantMsgId);
     } catch (err) {
       // The request never got a job running — every slot for this message
       // is unrecoverable without a retry, so mark them all as errored
@@ -418,7 +413,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
     setError(null);
     const thisCount = isFirst ? 5 : count;
     const instructionForTurn = isFirst ? tattooDescription : instruction.trim();
-    const editSourceUrls = editSourceIds.map(findImageUrl).filter((u): u is string => !!u);
+    const editSourceUrls = editSourceIds; // selection identity is the image URL itself
 
     try {
       // Resolve the reference image(s) to durable URLs *before* recording the
@@ -474,18 +469,22 @@ function ChatInner({ sessionId }: { sessionId: string }) {
     startGeneration(false, [...selectedIds]);
   }
 
-  async function handleFinalize(designId: string, imageUrl: string) {
-    setFinalizing(designId);
+  async function handleFinalize(imageUrl: string) {
+    setFinalizing(imageUrl);
     try {
-      await finalizeReworkSession(designId);
+      // Rework has no separate placement step — the generated image is
+      // already the finished on-skin result, so select + finalize happen
+      // back to back right here.
+      await persistSelectedDesign({ id: imageUrl, gradient: "", patternType: "mandala", styleName: "Design", imageUrl });
+      await finalizeSession();
       // Only one design can be finalized at a time — replace, not add, so
       // the gold badge moves instead of stacking on multiple tiles.
-      setFinalizedIds(new Set([designId]));
+      setFinalizedUrl(imageUrl);
       setFinalizeToast(true);
       setTimeout(() => setFinalizeToast(false), 2500);
       // Kick off the flash/sticker isolate in the background — chat doesn't
       // wait for or show it, Session Details is where it surfaces.
-      startFlashGeneration(designId, imageUrl).catch(() => {});
+      startFlashGeneration(sessionId, imageUrl).catch(() => {});
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -495,15 +494,19 @@ function ChatInner({ sessionId }: { sessionId: string }) {
 
   // Finalize is a one-way, visible action (locks in the design, and for
   // Rework replaces whatever was finalized before) — confirm before doing it.
-  function requestUse(designId: string, imageUrl: string) {
-    setConfirmingUse({ id: designId, url: imageUrl });
+  function requestUse(imageUrl: string) {
+    setConfirmingUse(imageUrl);
   }
 
-  function handleUse(designId: string, imageUrl: string) {
+  function handleUse(imageUrl: string) {
     if (sessionFlowType === "rework") {
-      handleFinalize(designId, imageUrl);
+      handleFinalize(imageUrl);
     } else {
-      selectDesign({ id: designId, dbId: designId, gradient: "", patternType: "mandala", styleName: "Design", imageUrl });
+      // AI Design: the chosen design is written onto the session the moment
+      // it's picked here (per the v4 schema), not deferred to a later finalize.
+      const design: DesignVariant = { id: imageUrl, gradient: "", patternType: "mandala", styleName: "Design", imageUrl };
+      selectDesign(design);
+      persistSelectedDesign(design).catch(() => {});
       router.push(`/${sessionId}/placement`);
     }
   }
@@ -516,9 +519,8 @@ function ChatInner({ sessionId }: { sessionId: string }) {
     );
   }
 
-  const viewingUrl = viewingId ? findImageUrl(viewingId) : undefined;
-  const viewingSiblings = viewingId ? allDesignIds() : [];
-  const viewingSiblingIndex = viewingId ? viewingSiblings.indexOf(viewingId) : -1;
+  const viewingSiblings = viewingUrl ? allImageUrls() : [];
+  const viewingSiblingIndex = viewingUrl ? viewingSiblings.indexOf(viewingUrl) : -1;
 
   return (
     <div className="relative flex flex-col h-[calc(100vh-57px)]">
@@ -575,14 +577,13 @@ function ChatInner({ sessionId }: { sessionId: string }) {
             </div>
           ) : (
             <div key={msg.id} className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5 sm:gap-3 max-w-3xl">
-              {msg.design_ids.map((designId, i) => {
-                const url = msg.image_urls[i];
-                const isSelected = selectedIds.has(designId);
-                const isFinalized = finalizedIds.has(designId);
+              {msg.image_urls.map((url, i) => {
+                const isSelected = selectedIds.has(url);
+                const isFinalized = finalizedUrl === url;
                 return (
                   <div
-                    key={designId}
-                    onClick={() => setViewingId(designId)}
+                    key={`${msg.id}-${i}`}
+                    onClick={() => setViewingUrl(url)}
                     className="relative group rounded-xl overflow-hidden border border-cleo-border bg-surface-2 cursor-pointer"
                     style={{ aspectRatio: "1" }}
                   >
@@ -590,7 +591,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
                     <img src={resolveImageSrc(url)} alt="Design" className="w-full h-full object-cover" />
 
                     <button
-                      onClick={(e) => { e.stopPropagation(); toggleSelect(designId); }}
+                      onClick={(e) => { e.stopPropagation(); toggleSelect(url); }}
                       className={`absolute top-1.5 left-1.5 w-5 h-5 rounded-md border flex items-center justify-center transition-colors cursor-pointer ${
                         isSelected ? "bg-gold border-gold" : "bg-black/50 border-white/40 hover:border-gold"
                       }`}
@@ -610,11 +611,11 @@ function ChatInner({ sessionId }: { sessionId: string }) {
                     )}
 
                     <button
-                      onClick={(e) => { e.stopPropagation(); requestUse(designId, url); }}
-                      disabled={finalizing === designId}
+                      onClick={(e) => { e.stopPropagation(); requestUse(url); }}
+                      disabled={finalizing === url}
                       className="absolute bottom-0 left-0 right-0 bg-black/70 backdrop-blur-sm text-white text-[10px] font-mono uppercase tracking-wider py-1.5 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer hover:bg-gold hover:text-bg disabled:opacity-50"
                     >
-                      {finalizing === designId ? "Finalizing…" : "✦ Finalize"}
+                      {finalizing === url ? "Finalizing…" : "✦ Finalize"}
                     </button>
                   </div>
                 );
@@ -668,27 +669,23 @@ function ChatInner({ sessionId }: { sessionId: string }) {
         <div className="bg-surface border border-cleo-border rounded-2xl shadow-2xl px-3.5 py-3 flex flex-col gap-2.5">
           {selectedIds.size > 0 && (
             <div className="flex items-center gap-1.5 flex-wrap">
-              {[...selectedIds].map((id) => {
-                const url = findImageUrl(id);
-                if (!url) return null;
-                return (
-                  <div
-                    key={id}
-                    onClick={() => setViewingRawUrl(url)}
-                    className="relative w-11 h-11 rounded-lg overflow-hidden border border-gold/40 flex-shrink-0 cursor-pointer"
+              {[...selectedIds].map((url) => (
+                <div
+                  key={url}
+                  onClick={() => setViewingRawUrl(url)}
+                  className="relative w-11 h-11 rounded-lg overflow-hidden border border-gold/40 flex-shrink-0 cursor-pointer"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={resolveImageSrc(url)} alt="Selected reference" className="w-full h-full object-cover" />
+                  <button
+                    onClick={(e) => { e.stopPropagation(); toggleSelect(url); }}
+                    className="absolute top-0 right-0 w-4 h-4 bg-black/70 hover:bg-error text-white text-[9px] flex items-center justify-center rounded-bl-md cursor-pointer transition-colors"
+                    aria-label="Remove"
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={resolveImageSrc(url)} alt="Selected reference" className="w-full h-full object-cover" />
-                    <button
-                      onClick={(e) => { e.stopPropagation(); toggleSelect(id); }}
-                      className="absolute top-0 right-0 w-4 h-4 bg-black/70 hover:bg-error text-white text-[9px] flex items-center justify-center rounded-bl-md cursor-pointer transition-colors"
-                      aria-label="Remove"
-                    >
-                      ×
-                    </button>
-                  </div>
-                );
-              })}
+                    ×
+                  </button>
+                </div>
+              ))}
             </div>
           )}
           <div className="flex items-center gap-2">
@@ -756,15 +753,15 @@ function ChatInner({ sessionId }: { sessionId: string }) {
       </div>
 
       {/* Full-screen viewer */}
-      {viewingId && viewingUrl && (
+      {viewingUrl && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          onClick={() => setViewingId(null)}
+          onClick={() => setViewingUrl(null)}
           className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 sm:p-8"
         >
           <button
-            onClick={() => setViewingId(null)}
+            onClick={() => setViewingUrl(null)}
             className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors flex items-center justify-center text-xl cursor-pointer"
             aria-label="Close"
           >
@@ -801,21 +798,21 @@ function ChatInner({ sessionId }: { sessionId: string }) {
             </div>
             <div className="flex items-center gap-3 w-full max-w-sm">
               <button
-                onClick={() => { toggleSelect(viewingId); setViewingId(null); }}
+                onClick={() => { toggleSelect(viewingUrl); setViewingUrl(null); }}
                 className={`flex-1 py-3 rounded-xl font-cinzel font-bold text-xs tracking-[0.08em] uppercase border transition-colors cursor-pointer ${
-                  selectedIds.has(viewingId)
+                  selectedIds.has(viewingUrl)
                     ? "bg-gold text-bg border-gold"
                     : "bg-transparent text-white border-white/30 hover:border-gold"
                 }`}
               >
-                {selectedIds.has(viewingId) ? "✓ Selected" : "Select to Edit"}
+                {selectedIds.has(viewingUrl) ? "✓ Selected" : "Select to Edit"}
               </button>
               <button
-                onClick={() => { const id = viewingId; const url = viewingUrl; setViewingId(null); requestUse(id, url); }}
-                disabled={finalizing === viewingId}
+                onClick={() => { const url = viewingUrl; setViewingUrl(null); requestUse(url); }}
+                disabled={finalizing === viewingUrl}
                 className="flex-1 py-3 rounded-xl bg-gold text-bg font-cinzel font-bold text-xs tracking-[0.08em] uppercase border border-gold hover:bg-gold-light transition-colors cursor-pointer disabled:opacity-50"
               >
-                {finalizing === viewingId ? "Finalizing…" : "✦ Finalize"}
+                {finalizing === viewingUrl ? "Finalizing…" : "✦ Finalize"}
               </button>
             </div>
           </div>
@@ -862,7 +859,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
           >
             <div className="w-full aspect-square rounded-xl overflow-hidden border border-cleo-border">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={resolveImageSrc(confirmingUse.url)} alt="Design to finalize" className="w-full h-full object-cover" />
+              <img src={resolveImageSrc(confirmingUse)} alt="Design to finalize" className="w-full h-full object-cover" />
             </div>
             <div>
               <h2 className="font-cinzel text-base font-bold text-ink">Finalize this design?</h2>
@@ -880,7 +877,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
                 Cancel
               </button>
               <button
-                onClick={() => { const { id, url } = confirmingUse; setConfirmingUse(null); handleUse(id, url); }}
+                onClick={() => { const url = confirmingUse; setConfirmingUse(null); handleUse(url); }}
                 className="flex-1 py-3 rounded-xl bg-gold text-bg font-cinzel font-bold text-xs tracking-[0.08em] uppercase border border-gold hover:bg-gold-light transition-colors cursor-pointer"
               >
                 ✦ Finalize

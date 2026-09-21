@@ -28,10 +28,10 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
     targetBodyArea, setTargetBodyArea,
     referenceImages, addReferenceImage, removeReferenceImage, replaceReferenceImage,
     selectedColors, toggleColor, clearColors,
-    generatedDesigns, finishGenerating,
+    hasChatHistory, finishGenerating,
     selectDesign,
     customerName,
-    persistDesigns,
+    persistSelectedDesign,
     hydrateFromSession,
     flowType, setFlowType, reworkMode, setReworkMode, reworkPhoto, setReworkPhoto,
     setPendingGeneration, setIsTextTattoo: setStoreIsTextTattoo,
@@ -106,10 +106,10 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
     // A direct/fresh visit to a session that already has AI-Design results —
     // generation and results now live entirely in Chat, so send it there
     // instead of showing this input form again.
-    if (flowType === "ai_design" && generatedDesigns.length > 0) {
+    if (flowType === "ai_design" && hasChatHistory) {
       router.replace(`/${sessionId}/chat`);
     }
-  }, [hydrating, customerName, flowType, generatedDesigns.length, sessionId, router]);
+  }, [hydrating, customerName, flowType, hasChatHistory, sessionId, router]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     accept: { "image/*": [".jpg", ".jpeg", ".png", ".webp", ".heic"] },
@@ -239,10 +239,9 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
         patternType: "mandala",
         styleName: directStyleName ?? "Customer Design",
       };
-      const [persisted] = await persistDesigns([design]);
-      const finalDesign = persisted ?? design;
-      finishGenerating([finalDesign]);
-      selectDesign(finalDesign);
+      await persistSelectedDesign(design);
+      finishGenerating([design]);
+      selectDesign(design);
       router.push(`/${sessionId}/placement`);
     } catch (err) {
       setDirectError((err as Error).message);

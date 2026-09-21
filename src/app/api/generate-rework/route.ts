@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
     sourcePhotoUrl,    // already-hosted — first generation, resumed session
     editInstruction = "",
     editSourceUrls = [] as string[],
-    parentDesignIds = [] as string[], // tattoo_designs.id values — for job/lineage tracking, not generation input
+    parentDesignIds = [] as string[], // source image URLs the client selected — for job/lineage tracking, not generation input
   } = await req.json();
 
   if (mode !== "cover" && mode !== "extend") {

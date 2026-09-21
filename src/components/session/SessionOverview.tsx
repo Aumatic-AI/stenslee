@@ -11,37 +11,23 @@ import TattooPrintStudio from "@/components/print/TattooPrintStudio";
 
 // ── Types ─────────────────────────────────────────────────────
 
-interface DesignRow {
-  id: string;
-  image_url: string;
-  style_name: string | null;
-  pattern_type: string | null;
-  iteration: number;
-  is_finalized: boolean;
-  flash_image_url: string | null;
-}
-
-interface PlacementRow {
-  id: string;
-  placement_text: string | null;
-  body_photo_url: string | null;
-  final_composite_url: string | null;
-  is_finalized: boolean;
-}
-
 interface SessionDetail {
   id: string;
-  tattoo_style: string | null;
-  tattoo_description: string | null;
+  style: string | null;
+  description: string | null;
   flow_type: "ai_design" | "rework";
   status: string;
   created_at: string;
   completed_at: string | null;
   deleted_at: string | null;
-  users: { first_name: string; phone: string } | null;
+  customers: { name: string; phone: string } | null;
   designer: { name: string; email: string } | null;
-  tattoo_designs: DesignRow[];
-  placements: PlacementRow[];
+  selected_design_url: string | null;
+  selected_design_style: string | null;
+  flash_image_url: string | null;
+  placement_text: string | null;
+  placement_body_photo_url: string | null;
+  placement_composite_url: string | null;
 }
 
 // ── Internal sub-components ───────────────────────────────────
@@ -165,6 +151,9 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
   const [flashUrl, setFlashUrl] = useState<string | null>(null);
   const [flashState, setFlashState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [flashError, setFlashError] = useState<string | null>(null);
+  // No more per-design table to check "has anything been generated yet" —
+  // read straight from chat_messages instead.
+  const [hasChatHistory, setHasChatHistory] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -184,17 +173,23 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
       const { data } = await supabase
         .from("sessions")
         .select(`
-          id, tattoo_style, tattoo_description, flow_type, status, created_at, completed_at, deleted_at,
-          users(first_name, phone),
-          designer:designer_id(name, email),
-          tattoo_designs(id, image_url, style_name, pattern_type, iteration, is_finalized, flash_image_url),
-          placements(id, placement_text, body_photo_url, final_composite_url, is_finalized)
+          id, style, description, flow_type, status, created_at, completed_at, deleted_at,
+          customers(name, phone),
+          designer:staff_id(name, email),
+          selected_design_url, selected_design_style, flash_image_url,
+          placement_text, placement_body_photo_url, placement_composite_url
         `)
         .eq("id", sessionId)
         .maybeSingle();
 
       if (!data) { setNotFound(true); setLoading(false); return; }
       setSession(data as unknown as SessionDetail);
+
+      const { count: chatCount } = await supabase
+        .from("chat_messages")
+        .select("id", { count: "exact", head: true })
+        .eq("session_id", sessionId);
+      setHasChatHistory((chatCount ?? 0) > 0);
 
       // Rework has no separate "reference images" upload step — the original
       // photo of the existing tattoo is stored as the first chat turn's
@@ -235,19 +230,18 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
   // it's already saved. Never auto-starts a job on its own. ─────
   useEffect(() => {
     if (!session || session.flow_type !== "rework") return;
-    const finalized = session.tattoo_designs.find((d) => d.is_finalized);
-    // Already have it (or nothing finalized yet) — nothing to check. The
+    // Already have it (or nothing selected yet) — nothing to check. The
     // saved URL is read straight from session during render, not mirrored
     // into state here.
-    if (!finalized || finalized.flash_image_url) return;
+    if (!session.selected_design_url || session.flash_image_url) return;
 
     let cancelled = false;
     (async () => {
-      const status = await checkFlashJob(finalized.id);
+      const status = await checkFlashJob(sessionId);
       if (cancelled) return;
       if (!status.found) return; // no job running — stays in the default "idle" state
       setFlashState("loading");
-      const url = await watchFlashGeneration(sessionId, finalized.id, (state, detail) => {
+      const url = await watchFlashGeneration(sessionId, (state, detail) => {
         if (cancelled) return;
         if (state === "loading") setFlashState("loading");
         if (state === "error") { setFlashState("error"); setFlashError(detail ?? "This image failed to generate."); }
@@ -257,16 +251,14 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
     })();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.id, session?.flow_type, session?.tattoo_designs.find((d) => d.is_finalized)?.id, session?.tattoo_designs.find((d) => d.is_finalized)?.flash_image_url]);
+  }, [session?.id, session?.flow_type, session?.selected_design_url, session?.flash_image_url]);
 
   async function handleGenerateFlash() {
-    if (!session) return;
-    const finalized = session.tattoo_designs.find((d) => d.is_finalized);
-    if (!finalized) return;
+    if (!session?.selected_design_url) return;
     setFlashState("loading");
     setFlashError(null);
-    await startFlashGeneration(finalized.id, finalized.image_url);
-    const url = await watchFlashGeneration(sessionId, finalized.id, (state, detail) => {
+    await startFlashGeneration(sessionId, session.selected_design_url);
+    const url = await watchFlashGeneration(sessionId, (state, detail) => {
       if (state === "error") { setFlashState("error"); setFlashError(detail ?? "This image failed to generate."); }
     });
     if (url) { setFlashUrl(url); setFlashState("done"); }
@@ -286,29 +278,23 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
     );
   }
 
-  const customer = Array.isArray(session.users) ? session.users[0] : session.users;
+  const customer = Array.isArray(session.customers) ? session.customers[0] : session.customers;
   const designer = Array.isArray(session.designer) ? session.designer[0] : session.designer;
-  const designs = Array.isArray(session.tattoo_designs) ? session.tattoo_designs : [];
-  const placements = Array.isArray(session.placements) ? session.placements : [];
 
-  // If any design was already generated, resume in Chat to keep iterating/
+  // If anything's already been generated, resume in Chat to keep iterating/
   // selecting (generation results live there now, not on the Design page);
   // otherwise resume at Design/Rework to start from scratch.
-  const continueUrl = designs.length > 0 ? `/${session.id}/chat` : `/${session.id}/design`;
+  const continueUrl = hasChatHistory ? `/${session.id}/chat` : `/${session.id}/design`;
 
-  const finalDesign = designs.find((d) => d.is_finalized);
   // flashUrl (local state) covers a just-finished generation before the
   // session reload catches up; otherwise read the saved value straight off
-  // the design row.
-  const resolvedFlashUrl = flashUrl ?? finalDesign?.flash_image_url ?? null;
+  // the session row.
+  const resolvedFlashUrl = flashUrl ?? session.flash_image_url ?? null;
   const resolvedFlashState = resolvedFlashUrl ? "done" : flashState;
   // Rework prints the sticker (clean design, no skin/shadows) — a photo of
   // it on-body would make a bad stencil. Nothing to print until it exists.
-  const printableImageUrl = session.flow_type === "rework" ? resolvedFlashUrl : (finalDesign?.image_url ?? null);
-  const finalPlacement =
-    placements.find((p) => p.is_finalized) ??
-    placements.find((p) => p.final_composite_url) ??
-    placements[0];
+  const printableImageUrl = session.flow_type === "rework" ? resolvedFlashUrl : session.selected_design_url;
+  const hasPlacement = !!(session.placement_text || session.placement_body_photo_url || session.placement_composite_url);
 
   const statusColor =
     session.status === "completed" ? "text-success bg-success/10 border-success/30" :
@@ -362,7 +348,7 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
         {printOpen && printableImageUrl && (
           <TattooPrintStudio
             imageUrl={printableImageUrl}
-            subtitle={`${session.tattoo_style ?? finalDesign?.style_name ?? "Custom"} · ${customer?.first_name ?? "Design"}`}
+            subtitle={`${session.style ?? session.selected_design_style ?? "Custom"} · ${customer?.name ?? "Design"}`}
             filenameBase={`tattoo-stencil-${session.id}`}
             onClose={() => setPrintOpen(false)}
           />
@@ -390,12 +376,12 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
             <div className="flex items-center gap-4">
               <div className="w-14 h-14 rounded-full bg-gold/10 border border-gold/30 flex items-center justify-center flex-shrink-0">
                 <span className="font-cinzel text-2xl font-black text-gold">
-                  {customer?.first_name?.charAt(0).toUpperCase() ?? "?"}
+                  {customer?.name?.charAt(0).toUpperCase() ?? "?"}
                 </span>
               </div>
               <div>
                 <p className="text-muted/50 text-[10px] font-mono uppercase tracking-widest mb-0.5">Customer</p>
-                <p className="text-ink font-cinzel font-black text-lg leading-none">{customer?.first_name ?? "Unknown"}</p>
+                <p className="text-ink font-cinzel font-black text-lg leading-none">{customer?.name ?? "Unknown"}</p>
                 <p className="text-muted text-sm font-mono mt-1">{customer?.phone ?? "—"}</p>
               </div>
             </div>
@@ -477,7 +463,7 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
 
           {/* Approved design image — sticker/flash for Rework, the
               generated design itself for AI Design */}
-          {finalDesign && (
+          {session.selected_design_url && (
             <div className="flex flex-col gap-2 sm:border-l sm:border-cleo-border sm:pl-8">
               <span className="text-muted/60 text-[10px] font-mono uppercase tracking-widest">
                 {session.flow_type === "rework" ? "Sticker Version" : "Approved Design"}
@@ -504,9 +490,9 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
                   </div>
                 )
               ) : (
-                <button onClick={() => setLightbox(finalDesign.image_url)}
+                <button onClick={() => setLightbox(session.selected_design_url!)}
                   className="w-full sm:w-36 aspect-square rounded-xl overflow-hidden border-2 border-gold/50 cursor-zoom-in">
-                  <Img url={finalDesign.image_url} alt="Final approved design" className="w-full h-full" />
+                  <Img url={session.selected_design_url!} alt="Final approved design" className="w-full h-full" />
                 </button>
               )}
             </div>
@@ -552,10 +538,10 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
               </div>
               <div className="flex flex-col gap-2">
                 <p className="text-[10px] font-mono uppercase tracking-widest text-muted">Finalized Design</p>
-                {finalDesign ? (
-                  <button onClick={() => setLightbox(finalDesign.image_url)}
+                {session.selected_design_url ? (
+                  <button onClick={() => setLightbox(session.selected_design_url!)}
                     className="aspect-square rounded-xl overflow-hidden border-2 border-gold/40 hover:border-gold transition-colors cursor-zoom-in shadow-[0_0_20px_rgba(201,168,76,0.15)]">
-                    <Img url={finalDesign.image_url} alt="Finalized rework design" className="w-full h-full" />
+                    <Img url={session.selected_design_url} alt="Finalized rework design" className="w-full h-full" />
                   </button>
                 ) : (
                   <div className="aspect-square rounded-xl border border-cleo-border bg-surface-2 flex items-center justify-center">
@@ -573,13 +559,13 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.2 }} className="flex flex-col gap-4">
           <SectionHeader title="Placement" />
-          {!finalPlacement ? (
+          {!hasPlacement ? (
             <div className="bg-surface border border-cleo-border rounded-xl p-6 text-center">
               <p className="text-muted text-sm">No placement data recorded.</p>
             </div>
           ) : (
             <div className="bg-surface border border-cleo-border rounded-2xl p-5 flex flex-col gap-5">
-              {finalPlacement.placement_text && (
+              {session.placement_text && (
                 <div className="flex items-center gap-3">
                   <svg className="w-5 h-5 text-gold flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a2 2 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
@@ -587,17 +573,17 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
                   </svg>
                   <div>
                     <p className="text-[10px] font-mono uppercase tracking-widest text-muted">Placement Area</p>
-                    <p className="text-ink font-semibold">{finalPlacement.placement_text}</p>
+                    <p className="text-ink font-semibold">{session.placement_text}</p>
                   </div>
                 </div>
               )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="flex flex-col gap-2">
                   <p className="text-[10px] font-mono uppercase tracking-widest text-muted">Body Photo</p>
-                  {finalPlacement.body_photo_url ? (
-                    <button onClick={() => setLightbox(finalPlacement.body_photo_url!)}
+                  {session.placement_body_photo_url ? (
+                    <button onClick={() => setLightbox(session.placement_body_photo_url!)}
                       className="aspect-square rounded-xl overflow-hidden border border-cleo-border hover:border-gold/40 transition-colors cursor-zoom-in">
-                      <Img url={finalPlacement.body_photo_url} alt="Body photo" className="w-full h-full" />
+                      <Img url={session.placement_body_photo_url} alt="Body photo" className="w-full h-full" />
                     </button>
                   ) : (
                     <div className="aspect-square rounded-xl border border-cleo-border bg-surface-2 flex items-center justify-center">
@@ -607,10 +593,10 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
                 </div>
                 <div className="flex flex-col gap-2">
                   <p className="text-[10px] font-mono uppercase tracking-widest text-muted">Final Composite</p>
-                  {finalPlacement.final_composite_url ? (
-                    <button onClick={() => setLightbox(finalPlacement.final_composite_url!)}
+                  {session.placement_composite_url ? (
+                    <button onClick={() => setLightbox(session.placement_composite_url!)}
                       className="aspect-square rounded-xl overflow-hidden border-2 border-gold/40 hover:border-gold transition-colors cursor-zoom-in shadow-[0_0_20px_rgba(201,168,76,0.15)]">
-                      <Img url={finalPlacement.final_composite_url} alt="Tattoo on body" className="w-full h-full" />
+                      <Img url={session.placement_composite_url} alt="Tattoo on body" className="w-full h-full" />
                     </button>
                   ) : (
                     <div className="aspect-square rounded-xl border border-cleo-border bg-surface-2 flex items-center justify-center">
@@ -625,22 +611,22 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
         )}
 
         {/* ── 5. Customer request — last, only shown when data exists ── */}
-        {(session.tattoo_style || session.tattoo_description) && (
+        {(session.style || session.description) && (
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.25 }}
           className="flex flex-col gap-4">
           <SectionHeader title="Customer Request" />
           <div className="bg-surface border border-cleo-border rounded-2xl p-5 flex flex-col gap-4">
-            {session.tattoo_style && (
+            {session.style && (
               <div className="flex flex-col gap-1">
                 <p className="text-[10px] font-mono uppercase tracking-widest text-muted">Tattoo Style</p>
-                <p className="text-gold font-cinzel font-bold text-base">{session.tattoo_style}</p>
+                <p className="text-gold font-cinzel font-bold text-base">{session.style}</p>
               </div>
             )}
-            {session.tattoo_style && session.tattoo_description && <div className="h-px bg-cleo-border" />}
-            {session.tattoo_description && (
+            {session.style && session.description && <div className="h-px bg-cleo-border" />}
+            {session.description && (
               <div className="flex flex-col gap-1">
                 <p className="text-[10px] font-mono uppercase tracking-widest text-muted">Description / Prompt</p>
-                <p className="text-ink text-sm leading-relaxed">{session.tattoo_description}</p>
+                <p className="text-ink text-sm leading-relaxed">{session.description}</p>
               </div>
             )}
           </div>

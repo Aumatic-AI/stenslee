@@ -10,7 +10,7 @@ const PAGE_SIZE = 10;
 
 interface Customer {
   id: string;
-  first_name: string;
+  name: string;
   phone: string;
   created_at: string;
   session_count: number;
@@ -18,29 +18,29 @@ interface Customer {
 }
 
 // Attaches session_count/last_session_at (from customer_session_stats) onto a
-// bare {id, first_name, phone[, created_at]} row list — used for both the
+// bare {id, name, phone[, created_at]} row list — used for both the
 // paginated browse list and the search-result list.
 async function withStats(
   supabase: ReturnType<typeof createSupabaseBrowserClient>,
-  rows: { id: string; first_name: string; phone: string; created_at?: string }[]
+  rows: { id: string; name: string; phone: string; created_at?: string }[]
 ): Promise<Customer[]> {
   if (rows.length === 0) return [];
   const { data: stats, error } = await supabase
     .from("customer_session_stats")
-    .select("user_id, session_count, last_session_at")
-    .in("user_id", rows.map((r) => r.id));
+    .select("customer_id, session_count, last_session_at")
+    .in("customer_id", rows.map((r) => r.id));
   if (error) console.error("customer_session_stats query failed — has the migration in supabase-schema.sql been run?", error);
 
   const countMap: Record<string, number> = {};
   const latestMap: Record<string, string> = {};
-  (stats ?? []).forEach((s: { user_id: string; session_count: number; last_session_at: string | null }) => {
-    countMap[s.user_id] = s.session_count;
-    if (s.last_session_at) latestMap[s.user_id] = s.last_session_at;
+  (stats ?? []).forEach((s: { customer_id: string; session_count: number; last_session_at: string | null }) => {
+    countMap[s.customer_id] = s.session_count;
+    if (s.last_session_at) latestMap[s.customer_id] = s.last_session_at;
   });
 
   return rows.map((r) => ({
     id: r.id,
-    first_name: r.first_name,
+    name: r.name,
     phone: r.phone,
     created_at: r.created_at ?? "",
     session_count: countMap[r.id] ?? 0,
@@ -80,8 +80,8 @@ export default function CustomersPage() {
 
   const loadPage = useCallback(async (offset: number) => {
     const { data, count } = await supabase
-      .from("users")
-      .select("id, first_name, phone, created_at", { count: "exact" })
+      .from("customers")
+      .select("id, name, phone, created_at", { count: "exact" })
       .order("created_at", { ascending: false })
       .range(offset, offset + PAGE_SIZE - 1);
 
@@ -228,13 +228,13 @@ export default function CustomersPage() {
                 >
                   <div className="w-10 h-10 rounded-full bg-gold/10 border border-gold/20 flex items-center justify-center flex-shrink-0 group-hover:border-gold/40 transition-colors">
                     <span className="font-cinzel text-sm font-black text-gold">
-                      {c.first_name.charAt(0).toUpperCase()}
+                      {c.name.charAt(0).toUpperCase()}
                     </span>
                   </div>
 
                   <div className="flex-1 min-w-0">
                     <p className="text-ink font-semibold truncate group-hover:text-gold transition-colors">
-                      {c.first_name}
+                      {c.name}
                     </p>
                     <p className="text-muted text-xs font-mono">{c.phone}</p>
                   </div>
