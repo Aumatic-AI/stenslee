@@ -220,3 +220,117 @@ returns boolean language sql security definer stable as $$
     false
   );
 $$;
+
+-- ── 8. SESSIONS ─────────────────────────────────────────────
+-- One session = one tattoo design journey, scoped to one organization.
+create table sessions (
+  id                        text        primary key,
+  organization_id           uuid        not null references organizations(id) on delete cascade,
+  customer_id               uuid        references customers(id) on delete set null,
+  staff_id                  uuid        references staff(id) on delete set null,
+  style                     text,
+  description               text,
+  body_area                 text,
+  flow_type                 text        not null default 'ai_design'
+                              check (flow_type in ('ai_design', 'rework')),
+  rework_source_photo_url   text,
+  rework_mode               text        check (rework_mode in ('cover', 'extend')),
+  status                    text        not null default 'active'
+                              check (status in ('active', 'completed', 'abandoned')),
+  selected_design_url       text,
+  selected_design_style     text,
+  flash_image_url           text,
+  placement_text            text,
+  placement_body_photo_url  text,
+  placement_composite_url   text,
+  created_at                timestamptz not null default now(),
+  completed_at              timestamptz,
+  deleted_at                timestamptz,
+  updated_at                timestamptz not null default now()
+);
+
+create index on sessions(organization_id);
+create index on sessions(customer_id);
+create index on sessions(staff_id);
+create index on sessions(status);
+create index on sessions(created_at);
+create index on sessions(deleted_at) where deleted_at is not null;
+
+create trigger set_updated_at before update on sessions
+  for each row execute function set_updated_at();
+
+comment on table sessions is 'One row per tattoo design session, scoped to one organization. staff_id means "handled by" -- an admin running their own session still sets it, same as a designer. selected_design_* / placement_* replace v3''s tattoo_designs/placements tables: a session only ever has one finalized design and one current placement. status = ''completed'' marks both as final -- no separate is_finalized flag. deleted_at is a soft-delete marker (30-day recoverable trash, see the PURGE JOB section below).';
+
+-- ── 9. CHAT MESSAGES ─────────────────────────────────────────
+create table chat_messages (
+  id               uuid        primary key default uuid_generate_v4(),
+  organization_id  uuid        not null references organizations(id) on delete cascade,
+  session_id       text        not null references sessions(id) on delete cascade,
+  role             text        not null check (role in ('user', 'assistant')),
+  content          text,
+  image_urls       text[]      not null default '{}',
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now()
+);
+
+create index on chat_messages(organization_id);
+create index on chat_messages(session_id, created_at);
+
+create trigger set_updated_at before update on chat_messages
+  for each row execute function set_updated_at();
+
+comment on table chat_messages is 'Chat screen transcript, one row per turn. v3''s design_ids[] is gone -- there is no tattoo_designs table left for it to point to. image_urls stays as the only array.';
+
+-- ── FUNCTION: finalize_session ───────────────────────────────
+-- The design and placement are already written onto `sessions` the
+-- moment staff picks them (selected_design_url / placement_composite_url)
+-- -- this just marks the session done. Collapses v3's finalize_session +
+-- finalize_rework_session into one function, since there are no more
+-- per-design/per-placement row IDs to pass in.
+create or replace function finalize_session(p_session_id text)
+returns void language plpgsql security definer as $$
+begin
+  update sessions set status = 'completed', completed_at = now() where id = p_session_id;
+end;
+$$;
+
+-- ── AGGREGATE VIEWS (performance) ────────────────────────────
+create or replace view public.designer_session_counts
+with (security_invoker = true) as
+select staff_id, count(*)::int as session_count
+from public.sessions
+where staff_id is not null
+group by staff_id;
+
+create or replace view public.customer_session_stats
+with (security_invoker = true) as
+select
+  customer_id,
+  count(*)::int as session_count,
+  max(completed_at) as last_session_at
+from public.sessions
+where customer_id is not null
+  and status = 'completed'
+group by customer_id;
+
+-- ── CUSTOMER SEARCH (name + phone, partial match) ────────────
+-- security_invoker means this runs with the caller's own row-level
+-- security, so once Task 5's RLS policy on `customers` is in place this
+-- naturally only searches the caller's own organization -- no explicit
+-- organization_id parameter needed.
+create or replace function public.search_customers(q text)
+returns table (id uuid, name text, phone text)
+language sql
+stable
+security invoker
+as $$
+  select id, name, phone
+  from public.customers
+  where name ilike '%' || q || '%'
+     or (
+       btrim(q) ~ '^[0-9 ()+-]+$'
+       and regexp_replace(phone, '\D', '', 'g') ilike '%' || regexp_replace(q, '\D', '', 'g') || '%'
+     )
+  order by name
+  limit 10;
+$$;
