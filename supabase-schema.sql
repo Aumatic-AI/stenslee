@@ -334,3 +334,217 @@ as $$
   order by name
   limit 10;
 $$;
+
+-- ── 10. USAGE LOGS ───────────────────────────────────────────
+-- One row per action: audit trail AND, counted for the period, a limit
+-- counter. No updated_at -- append-only, a row is written once, never edited.
+create table usage_logs (
+  id               uuid        primary key default uuid_generate_v4(),
+  organization_id  uuid        not null references organizations(id) on delete cascade,
+  staff_id         uuid        references staff(id) on delete set null,
+  session_id       text        references sessions(id) on delete set null,
+  feature_key      text        not null,
+  action           text        not null,
+  target_id        uuid,
+  metadata         jsonb       not null default '{}'::jsonb,
+  created_at       timestamptz not null default now()
+);
+
+-- The one index the whole permission system's performance rides on: the
+-- per-period usage count that runs on every limited action.
+create index usage_logs_org_feature_period_idx
+  on usage_logs(organization_id, feature_key, created_at);
+
+comment on table usage_logs is 'One row per staff action. Append-only audit trail; also the source of per-period usage counts for limit-type feature keys, via usage_logs_org_feature_period_idx.';
+
+-- ── FUNCTION: get_effective_access ───────────────────────────
+-- The one real permission gate. Checks organization_feature_overrides
+-- first, falls back to the org's plan_features row. For a limit-type key
+-- (limit_value is not null), also counts usage_logs for the current
+-- calendar month via usage_logs_org_feature_period_idx and reports how
+-- many uses remain. An action is allowed only when enabled = true AND
+-- (limit_value is null OR remaining > 0).
+create or replace function get_effective_access(
+  p_organization_id uuid,
+  p_feature_key     text
+)
+returns table (enabled boolean, limit_value int, used int, remaining int)
+language plpgsql
+security definer
+stable
+as $$
+declare
+  v_enabled     boolean;
+  v_limit       int;
+  v_used        int;
+begin
+  select o.enabled, o.limit_value into v_enabled, v_limit
+    from organization_feature_overrides o
+   where o.organization_id = p_organization_id and o.feature_key = p_feature_key;
+
+  if not found then
+    select pf.enabled, pf.limit_value into v_enabled, v_limit
+      from plan_features pf
+      join organizations org on org.plan_id = pf.plan_id
+     where org.id = p_organization_id and pf.feature_key = p_feature_key;
+  end if;
+
+  if not found and v_enabled is null then
+    return query select false, null::int, 0, 0;
+    return;
+  end if;
+
+  if v_limit is null then
+    return query select coalesce(v_enabled, false), null::int, 0, null::int;
+    return;
+  end if;
+
+  select count(*)::int into v_used
+    from usage_logs
+   where organization_id = p_organization_id
+     and feature_key = p_feature_key
+     and created_at >= date_trunc('month', now());
+
+  return query select coalesce(v_enabled, false), v_limit, v_used, greatest(v_limit - v_used, 0);
+end;
+$$;
+
+comment on function get_effective_access is 'Server-side permission + limit check. organization_feature_overrides always wins when a row is present; otherwise falls back to plan_features for the org''s plan. remaining is null for an uncapped/toggle-only feature.';
+
+-- ── FUNCTION: get_all_effective_access ───────────────────────
+-- Batch version of get_effective_access -- one row per feature_key the
+-- org's plan defines, in one round trip. Built for the app-load fetch
+-- (fetching all ~18 feature keys individually every time a staff member
+-- opens the app would be 18 round trips for no reason). Logic mirrors
+-- get_effective_access exactly, just set-based instead of per-key.
+create or replace function get_all_effective_access(p_organization_id uuid)
+returns table (feature_key text, enabled boolean, limit_value int, used int, remaining int)
+language plpgsql
+security definer
+stable
+as $$
+declare
+  v_plan_id uuid;
+begin
+  select plan_id into v_plan_id from organizations where id = p_organization_id;
+
+  return query
+  with base as (
+    -- One row per feature_key known to this org's plan, with the
+    -- override (if any) already applied on top of the plan default.
+    select
+      pf.feature_key,
+      coalesce(o.enabled, pf.enabled)         as enabled,
+      case when o.feature_key is not null then o.limit_value else pf.limit_value end as limit_value
+    from plan_features pf
+    left join organization_feature_overrides o
+      on o.organization_id = p_organization_id and o.feature_key = pf.feature_key
+    where pf.plan_id = v_plan_id
+  ),
+  usage as (
+    select ul.feature_key, count(*)::int as used
+      from usage_logs ul
+     where ul.organization_id = p_organization_id
+       and ul.created_at >= date_trunc('month', now())
+       -- Qualified as base.* (not bare feature_key/limit_value): those bare
+       -- names are ambiguous here against this function's own RETURNS
+       -- TABLE OUT parameters of the same names -- Postgres raises
+       -- "column reference is ambiguous" (42702) without the qualifier.
+       and ul.feature_key in (select base.feature_key from base where base.limit_value is not null)
+     group by ul.feature_key
+  )
+  select
+    b.feature_key,
+    b.enabled,
+    b.limit_value,
+    coalesce(u.used, 0) as used,
+    case when b.limit_value is null then null else greatest(b.limit_value - coalesce(u.used, 0), 0) end as remaining
+  from base b
+  left join usage u on u.feature_key = b.feature_key;
+end;
+$$;
+
+comment on function get_all_effective_access is 'Batch form of get_effective_access -- returns every feature_key the org''s plan defines in one call. Used for the app-load permission fetch (see the foundation implementation plan).';
+
+-- ── ROW-LEVEL SECURITY ──────────────────────────────────────
+alter table organizations                   enable row level security;
+alter table organization_feature_overrides  enable row level security;
+alter table staff                           enable row level security;
+alter table customers                       enable row level security;
+alter table sessions                        enable row level security;
+alter table chat_messages                   enable row level security;
+alter table usage_logs                      enable row level security;
+
+-- NOTE: API routes use SUPABASE_SERVICE_ROLE_KEY which bypasses RLS
+-- entirely. These policies apply to direct Supabase client calls from the
+-- browser (studio UI), scoped to the caller's own organization.
+
+-- ORGANIZATIONS (a staff member reads only their own org row)
+create policy "organizations: staff read own" on organizations for select
+  using (id = get_staff_org());
+
+-- ORGANIZATION FEATURE OVERRIDES (admin of that org can read its own overrides)
+create policy "org_overrides: admin read own" on organization_feature_overrides for select
+  using (is_admin() and organization_id = get_staff_org());
+
+-- STAFF
+create policy "staff: admin full access within org" on staff for all
+  using (is_admin() and organization_id = get_staff_org());
+create policy "staff: read own row" on staff for select
+  using (auth.uid() = id);
+
+-- CUSTOMERS
+create policy "customers: staff read own org"   on customers for select
+  using (organization_id = get_staff_org());
+create policy "customers: staff insert own org" on customers for insert
+  with check (organization_id = get_staff_org());
+create policy "customers: staff update own org" on customers for update
+  using (organization_id = get_staff_org());
+
+-- SESSIONS
+create policy "sessions: admin full access within org" on sessions for all
+  using (is_admin() and organization_id = get_staff_org());
+create policy "sessions: designer own sessions" on sessions for all
+  using (is_designer() and organization_id = get_staff_org() and staff_id = auth.uid());
+
+-- CHAT MESSAGES
+create policy "chat: admin full access within org" on chat_messages for all
+  using (is_admin() and organization_id = get_staff_org());
+create policy "chat: designer own" on chat_messages for all using (
+  is_designer() and organization_id = get_staff_org() and exists (
+    select 1 from sessions s
+     where s.id = chat_messages.session_id and s.staff_id = auth.uid()
+  )
+);
+
+-- USAGE LOGS
+create policy "usage_logs: admin read own org" on usage_logs for select
+  using (is_admin() and organization_id = get_staff_org());
+-- Insert allowed from the browser (not just the service role) -- consistent
+-- with this codebase's established pattern of writing from the browser
+-- client wherever RLS allows, since Node-side Supabase calls from this
+-- app's own server are unreliable on at least one dev machine (see
+-- AGENTS.md). A staff member logging their own usage is no more sensitive
+-- than the sessions/chat_messages writes already done this way.
+create policy "usage_logs: staff insert own org" on usage_logs for insert
+  with check (organization_id = get_staff_org() and (staff_id is null or staff_id = auth.uid()));
+
+-- ── STORAGE BUCKETS ─────────────────────────────────────────
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values
+  ('session-assets',   'session-assets',   true, 20971520,
+   array['image/jpeg','image/png','image/webp']),
+  ('reference-images', 'reference-images', true, 10485760,
+   array['image/jpeg','image/png','image/webp','image/heic'])
+on conflict (id) do update set
+  public             = excluded.public,
+  file_size_limit    = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+-- Lets staff upload directly from the browser instead of routing through
+-- a Node-side server upload (see AGENTS.md's Node/Supabase fetch note).
+-- Carried over unchanged from v3: role-only check, no session/org
+-- ownership check at the storage layer -- a pre-existing gap, not
+-- introduced or closed by this migration.
+create policy "session-assets: staff upload" on storage.objects for insert
+  with check (bucket_id = 'session-assets' and (is_admin() or is_designer()));
