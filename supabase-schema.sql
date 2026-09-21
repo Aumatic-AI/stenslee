@@ -481,6 +481,19 @@ alter table sessions                        enable row level security;
 alter table chat_messages                   enable row level security;
 alter table usage_logs                      enable row level security;
 
+-- platform_admins/plans/plan_features: RLS on, deliberately zero policies.
+-- These aren't tenant-scoped (see Design Notes), so they don't get an
+-- organization_id-based policy like the tables above -- but leaving RLS
+-- off entirely left them fully readable/writable by any anon/authenticated
+-- client, which nothing in the app needs today. Enabling RLS with no
+-- policies fails closed: direct browser/API access is blocked, while the
+-- service-role client used by API routes is unaffected (it always bypasses
+-- RLS). Real policies land once the Super Admin panel's own platform-admin
+-- auth exists (deferred, later phase).
+alter table platform_admins  enable row level security;
+alter table plans            enable row level security;
+alter table plan_features    enable row level security;
+
 -- NOTE: API routes use SUPABASE_SERVICE_ROLE_KEY which bypasses RLS
 -- entirely. These policies apply to direct Supabase client calls from the
 -- browser (studio UI), scoped to the caller's own organization.
