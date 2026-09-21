@@ -104,3 +104,43 @@ create trigger set_updated_at before update on plan_features
   for each row execute function set_updated_at();
 
 comment on table plan_features is 'Default access grid for every plan, one row per (plan, feature_key). limit_value is null for pure toggles and for uncapped limits.';
+
+-- ── 4. ORGANIZATIONS ────────────────────────────────────────
+-- One row per studio client (tenant).
+create table organizations (
+  id          uuid        primary key default uuid_generate_v4(),
+  name        text        not null,
+  slug        text        not null unique,
+  plan_id     uuid        references plans(id) on delete restrict,
+  status      text        not null default 'active'
+                check (status in ('active', 'suspended', 'cancelled')),
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+
+create index on organizations(plan_id);
+
+create trigger set_updated_at before update on organizations
+  for each row execute function set_updated_at();
+
+comment on table organizations is 'One row per studio (tenant). plan_id drives default feature access via plan_features; organization_feature_overrides can override per-org. No cached seat counters -- seat limits (designer_seats/admin_seats feature keys) are checked live via count(*) against staff, see Task 3.';
+
+-- ── 5. ORGANIZATION FEATURE OVERRIDES ───────────────────────
+-- Per-org exceptions to the plan default. A row here for (org, feature_key)
+-- always wins over plan_features, replacing both enabled and limit_value
+-- wholesale (not merged field-by-field).
+create table organization_feature_overrides (
+  organization_id uuid        not null references organizations(id) on delete cascade,
+  feature_key     text        not null,
+  enabled         boolean     not null default false,
+  limit_value     int,
+  updated_by      uuid        references platform_admins(id) on delete set null,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  primary key (organization_id, feature_key)
+);
+
+create trigger set_updated_at before update on organization_feature_overrides
+  for each row execute function set_updated_at();
+
+comment on table organization_feature_overrides is 'Per-org exceptions to plan_features. Presence of a row for (org, feature_key) always wins over the plan default -- checked first by getEffectiveAccess() (Task 5)';
