@@ -4,9 +4,6 @@ import type { NextRequest } from "next/server";
 
 const SESSION_TIMEOUT_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-// Routes that never require authentication
-const PUBLIC_PATHS = ["/studio/login"];
-
 // API routes — pass through without session check
 const PUBLIC_PREFIXES = [
   "/_next/",
@@ -45,7 +42,12 @@ function isSessionExpired(lastLogin: string | null): boolean {
   return Date.now() - new Date(lastLogin).getTime() > SESSION_TIMEOUT_MS;
 }
 
-export async function middleware(request: NextRequest) {
+// Next.js 16 renamed the middleware.ts file convention to proxy.ts (the
+// `middleware` export is deprecated and does not run) — and for a project
+// using a src/ directory, this file must live inside src/ (next to app/),
+// not at the project root, or it silently never executes. See
+// node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md.
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const response = { current: NextResponse.next({ request }) };
 
@@ -56,10 +58,6 @@ export async function middleware(request: NextRequest) {
 
   const supabase = makeSupabaseClient(request, response);
 
-  // getSession() reads the JWT from the cookie — no network call, gives us the
-  // user ID immediately so we can fire the staff DB query in parallel with
-  // getUser() (which does the real network validation with Supabase Auth).
-  // Was: getUser() → staff query (sequential). Now: max(getUser, staff query).
   const { data: { session: localSession } } = await supabase.auth.getSession();
   const localUserId = localSession?.user?.id;
 
@@ -68,7 +66,7 @@ export async function middleware(request: NextRequest) {
     localUserId
       ? supabase
           .from("staff")
-          .select("role, is_active, last_login, deleted_at")
+          .select("role, is_active, last_login_at, deleted_at")
           .eq("id", localUserId)
           .maybeSingle()
       : Promise.resolve({ data: null }),
@@ -77,7 +75,7 @@ export async function middleware(request: NextRequest) {
   // ── /studio/login — redirect to dashboard if already valid session ──
   if (pathname === "/studio/login") {
     if (user && staffResult) {
-      if (staffResult.is_active && !staffResult.deleted_at && !isSessionExpired(staffResult.last_login)) {
+      if (staffResult.is_active && !staffResult.deleted_at && !isSessionExpired(staffResult.last_login_at)) {
         const dest = staffResult.role === "admin" ? "/studio/admin" : "/studio/designer";
         return NextResponse.redirect(new URL(dest, request.url));
       }
@@ -102,7 +100,7 @@ export async function middleware(request: NextRequest) {
   }
 
   // Session expired — sign out and redirect to login
-  if (isSessionExpired(staff.last_login)) {
+  if (isSessionExpired(staff.last_login_at)) {
     await supabase.auth.signOut();
     return NextResponse.redirect(new URL("/studio/login?error=session_expired", request.url));
   }

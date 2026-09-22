@@ -53,7 +53,7 @@ function LoginForm() {
 
     await supabase
       .from("staff")
-      .update({ last_login: new Date().toISOString() })
+      .update({ last_login_at: new Date().toISOString() })
       .eq("id", user!.id);
 
     const dest = nextPath || (staff.role === "admin" ? "/studio/admin" : "/studio/designer");
