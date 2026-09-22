@@ -1,0 +1,158 @@
+@import "tailwindcss";
+
+:root {
+  --cleo-bg: #0d0d0d;
+  --cleo-surface: #1a1a1a;
+  --cleo-surface-2: #242424;
+  --cleo-gold: #c9a84c;
+  --cleo-gold-light: #e8c97a;
+  --cleo-gold-dark: #a07a2e;
+  --cleo-text: #f5f0e8;
+  --cleo-muted: #8a8070;
+  --cleo-success: #4caf70;
+  --cleo-error: #cf4040;
+  --cleo-border: #2a2a2a;
+}
+
+@theme inline {
+  --color-bg: var(--cleo-bg);
+  --color-surface: var(--cleo-surface);
+  --color-surface-2: var(--cleo-surface-2);
+  --color-gold: var(--cleo-gold);
+  --color-gold-light: var(--cleo-gold-light);
+  --color-gold-dark: var(--cleo-gold-dark);
+  --color-ink: var(--cleo-text);
+  --color-muted: var(--cleo-muted);
+  --color-success: var(--cleo-success);
+  --color-error: var(--cleo-error);
+  --color-cleo-border: var(--cleo-border);
+
+  --font-cinzel: var(--font-cinzel);
+  --font-body: var(--font-nunito);
+  --font-mono: var(--font-space-mono);
+}
+
+body {
+  background: var(--cleo-bg);
+  color: var(--cleo-text);
+  font-family: var(--font-nunito), Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--cleo-bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--cleo-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--cleo-muted);
+}
+
+/* Gold focus ring */
+*:focus-visible {
+  outline: 2px solid var(--cleo-gold);
+  outline-offset: 2px;
+}
+
+/* Fields that already show focus via their own border color (e.g. the chat
+   composer's textarea) skip the ring above — with outline-offset, it would
+   draw a second, tighter ring inside the field's own border. */
+.focus-ring-none:focus-visible {
+  outline: none;
+}
+
+/* Animations */
+@keyframes pulse-gold {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(201, 168, 76, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(201, 168, 76, 0); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+@keyframes ink-fill {
+  from { width: 0%; }
+  to { width: 100%; }
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes gold-ripple {
+  0% { box-shadow: 0 0 0 0 rgba(201, 168, 76, 0.6); }
+  100% { box-shadow: 0 0 0 20px rgba(201, 168, 76, 0); }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.4s ease both;
+}
+
+.animate-scale-in {
+  animation: scale-in 0.35s ease both;
+}
+
+.animate-pulse-gold {
+  animation: pulse-gold 2s ease-in-out infinite;
+}
+
+/* Skeleton shimmer */
+.skeleton {
+  background: linear-gradient(90deg, var(--cleo-surface) 25%, var(--cleo-surface-2) 50%, var(--cleo-surface) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* Slim scrollbar for horizontal strips (e.g. color palette, swatch rows) */
+.scrollbar-thin::-webkit-scrollbar { height: 4px; width: 4px; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: var(--cleo-border); border-radius: 999px; }
+.scrollbar-thin { scrollbar-width: thin; scrollbar-color: var(--cleo-border) transparent; }
+
+/* iOS safe-area aware bottom padding for fixed footers */
+.pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 0.75rem);
+}
+
+/* Reserves space for the mobile sticky footer so content isn't covered.
+   Inline `pb-28 md:pb-8` works too, but this keeps page-shell shorter. */
+.page-with-mobile-footer {
+  padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
+}
+@media (min-width: 768px) {
+  .page-with-mobile-footer { padding-bottom: 2rem; }
+}
+
+/* react-colorful defaults to a fixed 200x200 box — stretch it to the modal
+   width and match our rounded/dark aesthetic. */
+.cleo-color-picker .react-colorful {
+  width: 100%;
+  height: 180px;
+}
+.cleo-color-picker .react-colorful__saturation {
+  border-radius: 0.75rem 0.75rem 0 0;
+  border-bottom-width: 0;
+}
+.cleo-color-picker .react-colorful__hue {
+  height: 16px;
+  border-radius: 0 0 0.75rem 0.75rem;
+  margin-top: 10px;
+}
+.cleo-color-picker .react-colorful__hue,
+.cleo-color-picker .react-colorful__saturation {
+  box-shadow: inset 0 0 0 1px var(--cleo-border);
+}

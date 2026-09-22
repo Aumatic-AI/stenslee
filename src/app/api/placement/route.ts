@@ -1,0 +1,138 @@
+import { NextRequest } from "next/server";
+import { createKeiTask, waitForKeiTask, KeiTaskFailedError, KeiCreditsError } from "@/lib/kei-api";
+// TEST: minimal-prompt version, in use in place of the full-length prompts
+// in @/features/ai-design/prompts. Revert this import to go back to those.
+import {
+  buildPlacementPrompt,
+  buildCompositePrompt,
+  buildCompositePromptForComplexAnatomy,
+  classifySurface,
+} from "@/features/placement/prompts";
+import { startJob, setSlot } from "@/lib/generation-jobs";
+import { requireFeature } from "@/lib/permissions/require-feature";
+
+export const maxDuration = 300;
+
+type KeiRunResult =
+  | { ok: true; url: string; taskId: string }
+  | { ok: false; kind: "failed" | "timeout" | "error" | "credits"; reason: string; taskId?: string };
+
+// TEST: switched from Gemini 3 Pro Image (nano-banana-pro) to gpt-image —
+// nano-banana-pro kept drifting the tattoo's position/pose instead of
+// strictly preserving the composite; gpt-image's edit mode is built for
+// exactly that "change only this, preserve everything else" behavior and
+// already proved out for the Rework edit flow. Revert to "nano-banana-pro"
+// to go back.
+const PLACEMENT_MODEL = "gpt-image-2-image-to-image" as const;
+
+// Single attempt at a KEI generation. Caller decides whether to retry.
+async function runKeiOnce(prompt: string, inputUrls: string[]): Promise<KeiRunResult> {
+  let taskId: string | undefined;
+  try {
+    taskId = await createKeiTask(prompt, inputUrls, { model: PLACEMENT_MODEL });
+    const url = await waitForKeiTask(taskId);
+    return { ok: true, url, taskId };
+  } catch (err) {
+    if (err instanceof KeiCreditsError) {
+      return { ok: false, kind: "credits", reason: err.message };
+    }
+    if (err instanceof KeiTaskFailedError) {
+      return { ok: false, kind: "failed", reason: err.failMsg ?? err.message, taskId: err.taskId };
+    }
+    const reason = (err as Error).message;
+    const kind: "timeout" | "error" = /timed out/i.test(reason) ? "timeout" : "error";
+    return { ok: false, kind, reason, taskId };
+  }
+}
+
+// Up to two attempts: one retry on real failures (KEI 5xx, "Internal Error",
+// moderation flake). Timeouts and credits errors are not retried — a retry
+// would just queue the same doomed job and burn the request budget.
+async function runKeiWithRetry(prompt: string, inputUrls: string[]): Promise<KeiRunResult> {
+  const first = await runKeiOnce(prompt, inputUrls);
+  if (first.ok || first.kind === "timeout" || first.kind === "credits") return first;
+  console.warn(`[placement] KEI ${first.kind} (${first.reason}) — retrying once`);
+  return runKeiOnce(prompt, inputUrls);
+}
+
+// Fetching from KEI works reliably from this server (unlike uploading TO
+// Supabase, which doesn't) — download the result here but hand the bytes to
+// the browser as base64 and let it do the upload.
+async function fetchAsBase64(url: string): Promise<string> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Fetch failed (${res.status}) for ${url}`);
+  const contentType = res.headers.get("content-type") ?? "image/png";
+  const buffer = Buffer.from(await res.arrayBuffer());
+  return `data:${contentType};base64,${buffer.toString("base64")}`;
+}
+
+// Keyed separately from the chat's per-session generation job so a
+// placement generation never collides with an in-flight chat edit.
+function placementJobKey(sessionId: string): string {
+  return `placement:${sessionId}`;
+}
+
+export async function POST(req: NextRequest) {
+  // tattooImageUrl / bodyPhotoUrl / compositeUrl are already-hosted Supabase
+  // URLs — the browser uploads them directly before calling this route,
+  // since uploading TO Supabase from this server is unreliable.
+  const { sessionId, tattooImageUrl, bodyPhotoUrl, compositeUrl, placementText } = await req.json();
+
+  if (!sessionId) {
+    return Response.json({ error: "sessionId is required" }, { status: 400 });
+  }
+  if (!tattooImageUrl && !compositeUrl) {
+    return Response.json({ error: "tattooImageUrl or compositeUrl is required" }, { status: 400 });
+  }
+
+  const check = await requireFeature("placement");
+  if (!check.ok) return check.response;
+
+  let prompt: string;
+  let inputUrls: string[];
+
+  // ── Composite mode: user manually positioned the tattoo ──────────────
+  // Sends 3 images: composite (position) + tattoo design (detail) + body photo (skin/light)
+  if (compositeUrl) {
+    inputUrls = [compositeUrl];
+    if (tattooImageUrl) inputUrls.push(tattooImageUrl as string);
+    if (bodyPhotoUrl) inputUrls.push(bodyPhotoUrl as string);
+
+    const surface = classifySurface(placementText ?? "");
+    prompt = surface === "flat" ? buildCompositePrompt() : buildCompositePromptForComplexAnatomy(surface);
+  } else {
+    // ── Standard mode: separate tattoo + optional body photo ────────────
+    inputUrls = [tattooImageUrl];
+    if (bodyPhotoUrl) inputUrls.push(bodyPhotoUrl as string);
+    prompt = buildPlacementPrompt(placementText ?? "", !!bodyPhotoUrl);
+  }
+
+  // ── Start the job and return immediately ─────────────────────────────
+  // The client polls /api/generation-status instead of holding this
+  // connection open for the 1-3 minutes this generation can take — that
+  // also means a page reload doesn't kill an in-progress preview.
+  const jobKey = placementJobKey(sessionId);
+  startJob(jobKey, 1, 1);
+
+  void (async () => {
+    const result = await runKeiWithRetry(prompt, inputUrls);
+    if (!result.ok) {
+      console.warn(`[placement] generation failed: ${result.reason}`);
+      setSlot(jobKey, 0, {
+        status: "error",
+        reason: result.reason,
+        code: result.kind === "credits" ? "insufficient_credits" : undefined,
+      });
+      return;
+    }
+    try {
+      const imageBase64 = await fetchAsBase64(result.url);
+      setSlot(jobKey, 0, { status: "done", imageBase64 });
+    } catch (err) {
+      console.error("[placement] fetching result failed:", err);
+      setSlot(jobKey, 0, { status: "error", reason: `Fetching result failed: ${(err as Error).message}` });
+    }
+  })();
+
+  return Response.json({ ok: true });
+}
