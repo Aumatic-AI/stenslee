@@ -8,6 +8,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 import { resolveBackUrl } from "@/lib/auth-utils";
 import { startFlashGeneration, checkFlashJob, watchFlashGeneration } from "@/features/flash-isolate/flash-generation";
 import TattooPrintStudio from "@/features/print-stencil/TattooPrintStudio";
+import { useFeature } from "@/lib/permissions/use-feature";
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -154,6 +155,7 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
   // No more per-design table to check "has anything been generated yet" —
   // read straight from chat_messages instead.
   const [hasChatHistory, setHasChatHistory] = useState(false);
+  const printStencilFeature = useFeature("print_stencil");
 
   useEffect(() => {
     async function load() {
@@ -345,7 +347,7 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
 
       {/* Print studio modal */}
       <AnimatePresence>
-        {printOpen && printableImageUrl && (
+        {printOpen && printableImageUrl && printStencilFeature.enabled && (
           <TattooPrintStudio
             imageUrl={printableImageUrl}
             subtitle={`${session.style ?? session.selected_design_style ?? "Custom"} · ${customer?.name ?? "Design"}`}
@@ -396,7 +398,17 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
                 >
                   <span>✦ {session.status === "active" ? "Continue Design" : "Edit"}</span>
                 </button>
-                {printableImageUrl && (
+                {printableImageUrl && (!printStencilFeature.loading && !printStencilFeature.enabled ? (
+                  <span
+                    title="Not available on your plan"
+                    className="h-9 px-4 rounded-lg border border-cleo-border/50 text-muted/40 flex items-center gap-1.5 cursor-not-allowed font-cinzel font-bold text-[10px] tracking-widest uppercase"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
+                    </svg>
+                    Download
+                  </span>
+                ) : (
                   <button
                     onClick={() => setPrintOpen(true)}
                     className="h-9 px-4 rounded-lg border border-cleo-border text-ink hover:border-gold/50 transition-colors flex items-center gap-1.5 cursor-pointer font-cinzel font-bold text-[10px] tracking-widest uppercase"
@@ -406,7 +418,7 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
                     </svg>
                     Download
                   </button>
-                )}
+                ))}
                 {confirmingDelete ? (
                   <div className="flex items-center gap-1.5">
                     <span className="text-[10px] font-mono text-muted">Delete session?</span>

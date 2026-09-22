@@ -8,6 +8,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 import { useAppStore } from "@/store/app-store";
 import type { StaffMember } from "@/lib/staff-types";
+import { useFeature } from "@/lib/permissions/use-feature";
+import { FeatureLocked } from "@/components/ui/FeatureLocked";
 
 interface CustomerResult {
   id: string;
@@ -37,6 +39,7 @@ function formatPhone(value: string) {
 export default function DesignerDashboard() {
   const router = useRouter();
   const { setDesignerId, startSession, startSessionForUser } = useAppStore();
+  const customerManagementFeature = useFeature("customer_management");
 
   const [staff, setStaff] = useState<StaffMember | null>(null);
   const [query, setQuery] = useState("");
@@ -251,6 +254,9 @@ export default function DesignerDashboard() {
         </motion.div>
 
         {/* Customer Intake Card */}
+        {!customerManagementFeature.loading && !customerManagementFeature.enabled ? (
+          <FeatureLocked message="Customer lookup and creation isn't included in your current plan." />
+        ) : (
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
@@ -388,6 +394,7 @@ export default function DesignerDashboard() {
             )}
           </AnimatePresence>
         </motion.div>
+        )}
 
         {/* Recent Sessions */}
         <motion.div

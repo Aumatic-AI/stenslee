@@ -11,6 +11,7 @@ import { uploadPhotoDirect, uploadBase64Direct } from "@/lib/browser-upload";
 import { resolveImageSrc } from "@/lib/image-src";
 import { usePermissionStore } from "@/store/permission-store";
 import { logUsage } from "@/lib/permissions/log-usage";
+import { useFeature } from "@/lib/permissions/use-feature";
 
 // Shown when the AI image service rejects the request for exhausted credits.
 // Direct copy so studio staff immediately know the fix is to top up the AI
@@ -88,6 +89,10 @@ async function watchPlacementJob(sessionId: string): Promise<PlacementJobOutcome
 export default function PlacementPage({ params }: { params: Promise<{ sessionId: string }> }) {
   const { sessionId } = use(params);
   const router = useRouter();
+  const cameraFeature = useFeature("camera_capture");
+  // Treat "still loading" as enabled — avoids a flash of disabled controls
+  // before the permission store's first fetch resolves.
+  const cameraFeatureEnabled = cameraFeature.loading || cameraFeature.enabled;
 
   const {
     selectedDesign,
@@ -501,17 +506,22 @@ export default function PlacementPage({ params }: { params: Promise<{ sessionId:
           >
             {/* Mode tabs */}
             <div className="flex items-center gap-1 bg-surface rounded-xl border border-cleo-border p-1">
-              {(["text", "upload", "camera"] as const).map((mode) => (
+              {(["text", "upload", "camera"] as const).map((mode) => {
+                const locked = mode === "camera" && !cameraFeatureEnabled;
+                return (
                 <button
                   key={mode}
-                  onClick={() => handleModeChange(mode)}
+                  onClick={() => { if (!locked) handleModeChange(mode); }}
+                  disabled={locked}
+                  title={locked ? "Not available on your plan" : undefined}
                   className={`flex-1 py-2 px-2 rounded-lg text-xs font-cinzel tracking-wide transition-all ${
-                    inputMode === mode ? "bg-gold text-bg font-bold" : "text-muted hover:text-ink"
+                    locked ? "text-muted/30 cursor-not-allowed" : inputMode === mode ? "bg-gold text-bg font-bold" : "text-muted hover:text-ink"
                   }`}
                 >
                   {mode === "text" ? "📝 Describe" : mode === "upload" ? "📁 Upload" : "📷 Camera"}
                 </button>
-              ))}
+                );
+              })}
             </div>
 
             <AnimatePresence mode="wait">

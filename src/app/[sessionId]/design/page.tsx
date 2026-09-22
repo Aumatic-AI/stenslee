@@ -51,6 +51,13 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
     upload_existing: useFeature("upload_existing"),
     rework: useFeature("rework"),
   };
+  const cameraFeature = useFeature("camera_capture");
+  const pinterestFeature = useFeature("pinterest_search");
+  const browsePreviousFeature = useFeature("browse_previous");
+  // Treat "still loading" as enabled — avoids a flash of disabled controls
+  // before the permission store's first fetch resolves.
+  const cameraFeatureEnabled = cameraFeature.loading || cameraFeature.enabled;
+  const pinterestFeatureEnabled = pinterestFeature.loading || pinterestFeature.enabled;
 
   // Coming back to the same session already live in the store (e.g. from
   // Chat) — restore the tab/photo/mode instead of resetting to a blank form.
@@ -527,8 +534,14 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
                 {/* Camera capture */}
                 <button
                   type="button"
-                  onClick={() => setShowCamera(true)}
-                  className="flex flex-col items-center justify-center gap-3 rounded-xl border border-cleo-border hover:border-gold/50 hover:bg-surface-2 py-8 px-4 text-center transition-colors cursor-pointer"
+                  onClick={() => { if (cameraFeatureEnabled) setShowCamera(true); }}
+                  disabled={!cameraFeatureEnabled}
+                  title={!cameraFeatureEnabled ? "Not available on your plan" : undefined}
+                  className={`flex flex-col items-center justify-center gap-3 rounded-xl border py-8 px-4 text-center transition-colors ${
+                    cameraFeatureEnabled
+                      ? "border-cleo-border hover:border-gold/50 hover:bg-surface-2 cursor-pointer"
+                      : "border-cleo-border/50 opacity-40 cursor-not-allowed"
+                  }`}
                 >
                   <div className="w-12 h-12 rounded-full bg-gold/10 border border-gold/30 flex items-center justify-center">
                     <svg className="w-5 h-5 text-gold" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -545,8 +558,14 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
                 {/* Browse previous designs */}
                 <button
                   type="button"
-                  onClick={() => setShowPreviousDesigns(true)}
-                  className="flex flex-col items-center justify-center gap-3 rounded-xl border border-cleo-border hover:border-gold/50 hover:bg-surface-2 py-8 px-4 text-center transition-colors cursor-pointer"
+                  onClick={() => { if (browsePreviousFeature.enabled || browsePreviousFeature.loading) setShowPreviousDesigns(true); }}
+                  disabled={!browsePreviousFeature.loading && !browsePreviousFeature.enabled}
+                  title={!browsePreviousFeature.loading && !browsePreviousFeature.enabled ? "Not available on your plan" : undefined}
+                  className={`flex flex-col items-center justify-center gap-3 rounded-xl border py-8 px-4 text-center transition-colors ${
+                    !browsePreviousFeature.loading && !browsePreviousFeature.enabled
+                      ? "border-cleo-border/50 opacity-40 cursor-not-allowed"
+                      : "border-cleo-border hover:border-gold/50 hover:bg-surface-2 cursor-pointer"
+                  }`}
                 >
                   <div className="w-12 h-12 rounded-full bg-gold/10 border border-gold/30 flex items-center justify-center">
                     <svg className="w-5 h-5 text-gold" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -954,15 +973,22 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
                 )}
               </div>
               <div className="flex items-center gap-1 bg-bg rounded-lg border border-cleo-border p-0.5 w-full sm:w-auto">
-                {(["upload", "camera", "pinterest"] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    onClick={() => setInputMode(mode)}
-                    className={`flex-1 sm:flex-none px-2 sm:px-3 py-1.5 sm:py-1 rounded-md text-[11px] sm:text-xs font-cinzel tracking-wide transition-all whitespace-nowrap ${inputMode === mode ? "bg-gold text-bg font-bold" : "text-muted hover:text-ink"}`}
-                  >
-                    {mode === "upload" ? "📁 Upload" : mode === "camera" ? "📷 Camera" : "🔍 Pinterest"}
-                  </button>
-                ))}
+                {(["upload", "camera", "pinterest"] as const).map((mode) => {
+                  const locked = mode === "camera" ? !cameraFeatureEnabled : mode === "pinterest" ? !pinterestFeatureEnabled : false;
+                  return (
+                    <button
+                      key={mode}
+                      onClick={() => { if (!locked) setInputMode(mode); }}
+                      disabled={locked}
+                      title={locked ? "Not available on your plan" : undefined}
+                      className={`flex-1 sm:flex-none px-2 sm:px-3 py-1.5 sm:py-1 rounded-md text-[11px] sm:text-xs font-cinzel tracking-wide transition-all whitespace-nowrap ${
+                        locked ? "text-muted/30 cursor-not-allowed" : inputMode === mode ? "bg-gold text-bg font-bold" : "text-muted hover:text-ink"
+                      }`}
+                    >
+                      {mode === "upload" ? "📁 Upload" : mode === "camera" ? "📷 Camera" : "🔍 Pinterest"}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 

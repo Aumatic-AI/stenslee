@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
+import { useFeature } from "@/lib/permissions/use-feature";
+import { FeatureLocked } from "@/components/ui/FeatureLocked";
 
 const PAGE_SIZE = 10;
 
@@ -68,6 +70,7 @@ function CustomerRowSkeleton() {
 export default function CustomersPage() {
   const router = useRouter();
   const supabase = createSupabaseBrowserClient();
+  const customerManagementFeature = useFeature("customer_management");
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -140,6 +143,14 @@ export default function CustomersPage() {
   const isSearchMode = query.trim().length > 0;
   const displayed = isSearchMode ? (searchResults ?? []) : customers;
   const hasMore = !isSearchMode && customers.length < totalCount;
+
+  if (!customerManagementFeature.loading && !customerManagementFeature.enabled) {
+    return (
+      <div className="flex-1 flex items-center justify-center px-4">
+        <FeatureLocked title="Customers not available" message="Customer management isn't included in your current plan." />
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 px-4 sm:px-6 py-6 sm:py-8 max-w-3xl mx-auto w-full flex flex-col gap-5">

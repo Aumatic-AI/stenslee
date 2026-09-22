@@ -5,9 +5,14 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
+import { useFeature } from "@/lib/permissions/use-feature";
 
 const PAGE_SIZE = 15;
-const RETENTION_DAYS = 30;
+// Fallback only -- the real value is this org's trash_retention plan limit,
+// read live below. Matches the purge-trash cron's own default for an
+// unconfigured org, so the displayed countdown never disagrees with what
+// actually gets purged.
+const DEFAULT_RETENTION_DAYS = 30;
 
 interface TrashRow {
   id: string;
@@ -18,14 +23,16 @@ interface TrashRow {
   isNew: boolean;
 }
 
-function daysLeft(deletedAt: string): number {
-  const purgeAt = new Date(deletedAt).getTime() + RETENTION_DAYS * 24 * 60 * 60 * 1000;
+function daysLeft(deletedAt: string, retentionDays: number): number {
+  const purgeAt = new Date(deletedAt).getTime() + retentionDays * 24 * 60 * 60 * 1000;
   return Math.max(0, Math.ceil((purgeAt - Date.now()) / (24 * 60 * 60 * 1000)));
 }
 
 export default function TrashPage() {
   const router = useRouter();
   const supabase = createSupabaseBrowserClient();
+  const trashRetentionFeature = useFeature("trash_retention");
+  const retentionDays = trashRetentionFeature.limitValue ?? DEFAULT_RETENTION_DAYS;
 
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<TrashRow[]>([]);
@@ -182,7 +189,7 @@ export default function TrashPage() {
       </div>
 
       <p className="text-muted text-xs -mt-2">
-        Sessions are kept here for {RETENTION_DAYS} days after deletion, then permanently removed automatically. Restore or delete them for good any time before that.
+        Sessions are kept here for {retentionDays} days after deletion, then permanently removed automatically. Restore or delete them for good any time before that.
       </p>
 
       {/* Search bar */}
@@ -240,7 +247,7 @@ export default function TrashPage() {
         <div className="flex flex-col gap-2">
           <AnimatePresence mode="popLayout">
             {displayed.map((r) => {
-              const left = daysLeft(r.deleted_at);
+              const left = daysLeft(r.deleted_at, retentionDays);
               return (
                 <motion.div
                   key={r.id}
