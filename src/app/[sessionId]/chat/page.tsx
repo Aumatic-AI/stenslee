@@ -337,16 +337,21 @@ function ChatInner({ sessionId }: { sessionId: string }) {
 
     let assistantMsgId: string | null = null;
     try {
+      // chat_messages.organization_id is NOT NULL with no default or
+      // populating trigger -- must be supplied explicitly on every insert.
+      const organizationId = usePermissionStore.getState().staff?.organizationId;
+      if (!organizationId) throw new Error("Could not determine your organization — try reloading the page.");
+
       const { data: userMsg, error: userMsgErr } = await supabase
         .from("chat_messages")
-        .insert({ session_id: sessionId, role: "user", content: instructionForTurn, image_urls: referenceUrls })
+        .insert({ session_id: sessionId, role: "user", content: instructionForTurn, image_urls: referenceUrls, organization_id: organizationId })
         .select()
         .single();
       if (userMsgErr) throw new Error(`Couldn't save your message: ${userMsgErr.message}`);
 
       const { data: assistantMsg, error: assistantMsgErr } = await supabase
         .from("chat_messages")
-        .insert({ session_id: sessionId, role: "assistant", content: null, image_urls: [] })
+        .insert({ session_id: sessionId, role: "assistant", content: null, image_urls: [], organization_id: organizationId })
         .select()
         .single();
       if (assistantMsgErr) throw new Error(`Couldn't start the reply: ${assistantMsgErr.message}`);
@@ -401,16 +406,13 @@ function ChatInner({ sessionId }: { sessionId: string }) {
       // Logged under "ai_design" even for rework -- rework shares ai_design's
       // usage pool per the Permission Registry, so its consumption has to
       // land in the same counter for the shared limit to mean anything.
-      const organizationId = usePermissionStore.getState().staff?.organizationId;
-      if (organizationId) {
-        logUsage({
-          organizationId,
-          featureKey: "ai_design",
-          action: isFirst ? "batch_generated" : "refinement_round",
-          sessionId,
-          metadata: sessionFlowType === "rework" ? { via: "rework" } : undefined,
-        }).catch(() => {});
-      }
+      logUsage({
+        organizationId,
+        featureKey: "ai_design",
+        action: isFirst ? "batch_generated" : "refinement_round",
+        sessionId,
+        metadata: sessionFlowType === "rework" ? { via: "rework" } : undefined,
+      }).catch(() => {});
 
       await watchJob(newAssistantMsgId);
     } catch (err) {

@@ -134,6 +134,7 @@ function CustomerDashboardInner() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [startingSession, setStartingSession] = useState(false);
+  const [tattooError, setTattooError] = useState("");
 
   const [editingProfile, setEditingProfile] = useState(false);
   const [editName, setEditName] = useState("");
@@ -254,8 +255,14 @@ function CustomerDashboardInner() {
   async function handleNewTattoo() {
     if (!profile) return;
     setStartingSession(true);
-    const sessionId = await startSessionForUser(userId, profile.name, profile.phone);
-    router.push(`/${sessionId}/design`);
+    setTattooError("");
+    try {
+      const sessionId = await startSessionForUser(userId, profile.name, profile.phone);
+      router.push(`/${sessionId}/design`);
+    } catch (err) {
+      setTattooError(err instanceof Error ? err.message : "Couldn't start the session.");
+      setStartingSession(false);
+    }
   }
 
   function openEditProfile() {
@@ -340,6 +347,10 @@ function CustomerDashboardInner() {
           {startingSession ? "…" : "+ New Tattoo"}
         </motion.button>
       </header>
+
+      {tattooError && (
+        <p className="text-error text-xs text-center px-4 pt-3">{tattooError}</p>
+      )}
 
       <div className="flex-1 px-4 sm:px-6 py-6 sm:py-8 flex flex-col gap-6 sm:gap-8 max-w-2xl mx-auto w-full">
         {/* Profile card */}

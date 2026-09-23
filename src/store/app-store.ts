@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type { StateStorage } from "zustand/middleware";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
+import { usePermissionStore } from "@/store/permission-store";
 
 // Throttled localStorage — batches rapid writes (e.g. during streaming generation)
 // into one write per 400ms instead of one per state update. Reads are always instant.
@@ -209,16 +210,31 @@ export const useAppStore = create<AppState>()(
       return { sessionId: "", userId: existing.id, isNew: false };
     }
 
+    // customers/sessions.organization_id is NOT NULL with no default or
+    // populating trigger -- it must be supplied explicitly on every insert,
+    // or the insert fails outright. usePermissionStore is bootstrapped in
+    // the root layout, so this is populated by the time a staff member can
+    // reach this action.
+    const organizationId = usePermissionStore.getState().staff?.organizationId;
+    if (!organizationId) {
+      throw new Error("Could not determine your organization — try reloading the page.");
+    }
+
     // New customer — insert and start a session
     const id = generateId();
-    const { data: customer } = await supabase
+    const { data: customer, error: customerError } = await supabase
       .from("customers")
-      .insert({ name, phone })
+      .insert({ name, phone, organization_id: organizationId })
       .select("id")
       .single();
+    if (customerError) throw new Error(`Couldn't create the customer: ${customerError.message}`);
 
     const { designerId } = get();
-    await supabase.from("sessions").insert({ id, customer_id: customer?.id ?? null, status: "active", staff_id: designerId ?? null });
+    const { error: sessionError } = await supabase.from("sessions").insert({
+      id, customer_id: customer?.id ?? null, status: "active",
+      staff_id: designerId ?? null, organization_id: organizationId,
+    });
+    if (sessionError) throw new Error(`Couldn't start the session: ${sessionError.message}`);
     set({
       ...freshSessionDesignState,
       sessionId: id, customerId: customer?.id ?? null,
@@ -228,9 +244,18 @@ export const useAppStore = create<AppState>()(
   },
 
   startSessionForUser: async (userId, name, phone) => {
+    const organizationId = usePermissionStore.getState().staff?.organizationId;
+    if (!organizationId) {
+      throw new Error("Could not determine your organization — try reloading the page.");
+    }
+
     const id = generateId();
     const { designerId } = get();
-    await supabase.from("sessions").insert({ id, customer_id: userId, status: "active", staff_id: designerId ?? null });
+    const { error: sessionError } = await supabase.from("sessions").insert({
+      id, customer_id: userId, status: "active",
+      staff_id: designerId ?? null, organization_id: organizationId,
+    });
+    if (sessionError) throw new Error(`Couldn't start the session: ${sessionError.message}`);
     set({
       ...freshSessionDesignState,
       sessionId: id, customerId: userId,

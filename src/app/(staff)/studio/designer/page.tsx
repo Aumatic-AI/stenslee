@@ -50,6 +50,7 @@ export default function DesignerDashboard() {
   const [searching, setSearching] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState("");
   const [recentSessions, setRecentSessions] = useState<RecentSession[]>([]);
   const [totalSessionCount, setTotalSessionCount] = useState(0);
   const [loadingRecent, setLoadingRecent] = useState(true);
@@ -167,21 +168,33 @@ export default function DesignerDashboard() {
   async function handleStartExisting() {
     if (!selectedCustomer) return;
     setStarting(true);
-    const sessionId = await startSessionForUser(selectedCustomer.id, selectedCustomer.name, selectedCustomer.phone);
-    router.push(`/${sessionId}/design`);
+    setStartError("");
+    try {
+      const sessionId = await startSessionForUser(selectedCustomer.id, selectedCustomer.name, selectedCustomer.phone);
+      router.push(`/${sessionId}/design`);
+    } catch (err) {
+      setStartError(err instanceof Error ? err.message : "Couldn't start the session.");
+      setStarting(false);
+    }
   }
 
   async function handleCreateNew(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim() || newPhone.replace(/\D/g, "").length < 10) return;
     setStarting(true);
-    const { sessionId, userId } = await startSession(name.trim(), newPhone);
+    setStartError("");
+    try {
+      const { sessionId, userId } = await startSession(name.trim(), newPhone);
 
-    if (userId && !sessionId) {
-      // Existing user detected mid-flow — go to their dashboard
-      router.push(`/customer/${userId}`);
-    } else if (sessionId) {
-      router.push(`/${sessionId}/design`);
+      if (userId && !sessionId) {
+        // Existing user detected mid-flow — go to their dashboard
+        router.push(`/customer/${userId}`);
+      } else if (sessionId) {
+        router.push(`/${sessionId}/design`);
+      }
+    } catch (err) {
+      setStartError(err instanceof Error ? err.message : "Couldn't create the customer.");
+      setStarting(false);
     }
   }
 
@@ -337,6 +350,7 @@ export default function DesignerDashboard() {
                     </p>
                   </div>
                 </div>
+                {startError && <p className="text-error text-xs">{startError}</p>}
                 <div className="flex gap-2">
                   <button
                     onClick={handleStartExisting}
@@ -383,6 +397,7 @@ export default function DesignerDashboard() {
                   onChange={(e) => setNewPhone(formatPhone(e.target.value))}
                   className="bg-bg border border-cleo-border rounded-xl px-4 py-3 text-ink font-mono text-base placeholder:text-muted/40 focus:outline-none focus:border-gold transition-colors"
                 />
+                {startError && <p className="text-error text-xs">{startError}</p>}
                 <button
                   type="submit"
                   disabled={starting || !name.trim() || newPhone.replace(/\D/g, "").length < 10}
