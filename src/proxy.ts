@@ -83,11 +83,22 @@ export async function proxy(request: NextRequest) {
   // AdminSidebarShell/PermissionBootstrap re-run this same check reliably
   // (browser-side Supabase calls are unaffected), and RLS enforces
   // is_active/role at the data layer regardless of what happens here.
+  //
+  // Capped at 1.5s: on a machine where server-side fetches to Supabase are
+  // flaky, this call doesn't cleanly fail fast -- it can hang for 5-15s
+  // before ultimately erroring, which turned every navigation into a
+  // multi-second stall. Aborting early and falling through to the
+  // "couldn't verify" branch keeps the app responsive; it's still correct,
+  // just less strict for that one request.
+  const staffQueryController = new AbortController();
+  const staffQueryTimeout = setTimeout(() => staffQueryController.abort(), 1500);
   const { data: staff, error: staffError } = await supabase
     .from("staff")
     .select("role, is_active, last_login_at, deleted_at")
     .eq("id", session.user.id)
+    .abortSignal(staffQueryController.signal)
     .maybeSingle();
+  clearTimeout(staffQueryTimeout);
 
   const known = !staffError;
   const valid = known && !!staff && staff.is_active && !staff.deleted_at && !isSessionExpired(staff.last_login_at);
