@@ -7,6 +7,7 @@ import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 import { useFeature } from "@/lib/permissions/use-feature";
 import { FeatureLocked } from "@/components/ui/FeatureLocked";
+import AddCustomerModal from "@/features/customer-management/AddCustomerModal";
 
 const PAGE_SIZE = 10;
 
@@ -80,6 +81,7 @@ export default function CustomersPage() {
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Customer[] | null>(null);
   const [searching, setSearching] = useState(false);
+  const [addingCustomer, setAddingCustomer] = useState(false);
 
   const loadPage = useCallback(async (offset: number) => {
     const { data, count } = await supabase
@@ -166,6 +168,12 @@ export default function CustomersPage() {
               ? `${displayed.length} match${displayed.length === 1 ? "" : "es"}`
               : `${customers.length} of ${totalCount}`}
         </span>
+        <button
+          onClick={() => setAddingCustomer(true)}
+          className="bg-gold text-bg font-cinzel font-bold text-xs tracking-[0.08em] uppercase px-4 py-2.5 rounded-xl border border-gold hover:bg-gold-light transition-colors cursor-pointer flex-shrink-0"
+        >
+          + Add Customer
+        </button>
       </div>
 
       {/* Search bar */}
@@ -288,6 +296,20 @@ export default function CustomersPage() {
             </button>
           )}
         </div>
+      )}
+
+      {addingCustomer && (
+        <AddCustomerModal
+          onClose={() => setAddingCustomer(false)}
+          onCreated={(customer) => {
+            setCustomers((prev) => [
+              { ...customer, session_count: 0, last_session_at: null },
+              ...prev,
+            ]);
+            setTotalCount((prev) => prev + 1);
+            setAddingCustomer(false);
+          }}
+        />
       )}
     </div>
   );
