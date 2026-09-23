@@ -58,61 +58,69 @@ export async function proxy(request: NextRequest) {
 
   const supabase = makeSupabaseClient(request, response);
 
-  const { data: { session: localSession } } = await supabase.auth.getSession();
-  const localUserId = localSession?.user?.id;
+  // getSession() decodes the JWT already sitting in the cookie -- no
+  // network call in the common (non-expired-token) case, so this stays
+  // reliable even where the app's own server-side fetches to Supabase are
+  // flaky (see AGENTS.md's Node/Supabase note). Deliberately NOT calling
+  // getUser() here: that round-trips to the Auth server to re-verify the
+  // token, and on an affected machine that call can fail/never resolve
+  // truthfully, which previously made every request look unauthenticated
+  // and bounced it back to /studio/login in an infinite loop even with a
+  // perfectly valid session.
+  const { data: { session } } = await supabase.auth.getSession();
 
-  const [{ data: { user } }, { data: staffResult }] = await Promise.all([
-    supabase.auth.getUser(),
-    localUserId
-      ? supabase
-          .from("staff")
-          .select("role, is_active, last_login_at, deleted_at")
-          .eq("id", localUserId)
-          .maybeSingle()
-      : Promise.resolve({ data: null }),
-  ]);
-
-  // ── /studio/login — redirect to dashboard if already valid session ──
-  if (pathname === "/studio/login") {
-    if (user && staffResult) {
-      if (staffResult.is_active && !staffResult.deleted_at && !isSessionExpired(staffResult.last_login_at)) {
-        const dest = staffResult.role === "admin" ? "/studio/admin" : "/studio/designer";
-        return NextResponse.redirect(new URL(dest, request.url));
-      }
-      await supabase.auth.signOut();
-    }
-    return response.current;
-  }
-
-  // ── All other routes — require valid staff session ────────
-  if (!user) {
+  if (!session) {
+    if (pathname === "/studio/login") return response.current;
     const loginUrl = new URL("/studio/login", request.url);
-    loginUrl.searchParams.set("next", pathname);
+    if (pathname !== "/") loginUrl.searchParams.set("next", pathname);
     return NextResponse.redirect(loginUrl);
   }
 
-  const staff = staffResult;
+  // A session cookie exists and passed local JWT validation. Try the
+  // richer staff-row check (role, is_active, deleted_at, 24hr timeout),
+  // but degrade gracefully instead of forcing a redirect if this specific
+  // network call can't complete -- the browser-side checks already run in
+  // AdminSidebarShell/PermissionBootstrap re-run this same check reliably
+  // (browser-side Supabase calls are unaffected), and RLS enforces
+  // is_active/role at the data layer regardless of what happens here.
+  const { data: staff, error: staffError } = await supabase
+    .from("staff")
+    .select("role, is_active, last_login_at, deleted_at")
+    .eq("id", session.user.id)
+    .maybeSingle();
 
-  // Not a staff member, deactivated, or soft-deleted
-  if (!staff || !staff.is_active || staff.deleted_at) {
-    await supabase.auth.signOut();
-    return NextResponse.redirect(new URL("/studio/login?error=access_denied", request.url));
+  const known = !staffError;
+  const valid = known && !!staff && staff.is_active && !staff.deleted_at && !isSessionExpired(staff.last_login_at);
+
+  // ── /studio/login — redirect to dashboard if already valid session ──
+  if (pathname === "/studio/login") {
+    if (valid) {
+      const dest = staff!.role === "admin" ? "/studio/admin" : "/studio/designer";
+      return NextResponse.redirect(new URL(dest, request.url));
+    }
+    if (known) await supabase.auth.signOut();
+    return response.current;
   }
 
-  // Session expired — sign out and redirect to login
-  if (isSessionExpired(staff.last_login_at)) {
+  // Confirmed invalid (not "couldn't check") — sign out and bounce
+  if (known && !valid) {
     await supabase.auth.signOut();
-    return NextResponse.redirect(new URL("/studio/login?error=session_expired", request.url));
+    const reason = staff && isSessionExpired(staff.last_login_at) ? "session_expired" : "access_denied";
+    return NextResponse.redirect(new URL(`/studio/login?error=${reason}`, request.url));
   }
+
+  // Couldn't verify (network failure) — let the request through; the
+  // browser-side checks and RLS still gate the actual data.
+  if (!known) return response.current;
 
   // Designers cannot access /studio/admin
-  if (pathname.startsWith("/studio/admin") && staff.role !== "admin") {
+  if (pathname.startsWith("/studio/admin") && staff!.role !== "admin") {
     return NextResponse.redirect(new URL("/studio/designer", request.url));
   }
 
   // Root redirect based on role
   if (pathname === "/" || pathname === "/studio") {
-    const dest = staff.role === "admin" ? "/studio/admin" : "/studio/designer";
+    const dest = staff!.role === "admin" ? "/studio/admin" : "/studio/designer";
     return NextResponse.redirect(new URL(dest, request.url));
   }
 

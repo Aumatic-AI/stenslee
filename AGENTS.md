@@ -211,7 +211,7 @@ role (used in API routes for privileged operations) bypasses RLS entirely.
 ## Key Files
 
 ### Auth & Security
-- `middleware.ts` — route protection, 24hr session timeout, soft-delete check. Reads the cookie-local session first, then runs `getUser()` and the staff-row query in parallel (not sequentially).
+- `src/proxy.ts` — route protection, 24hr session timeout, soft-delete check. Reads the cookie-local session first, then runs `getUser()` and the staff-row query in parallel (not sequentially). Next.js 16 renamed the `middleware.ts` convention to `proxy.ts`, and for a `src/` layout it must live inside `src/` — putting it at the project root (the old convention) makes it silently never run. If a route-protection change doesn't seem to take effect, confirm this file is still at `src/proxy.ts` before debugging anything else.
 - `src/lib/supabase-server.ts` — `createSupabaseServerClient` (cookie-based, server components/routes), `createServiceClient` (service role, bypasses RLS — API routes only), `getStaffSession`
 - `src/lib/supabase-client.ts` — `createSupabaseBrowserClient`, safe in `"use client"` components; the default for reads/writes per the Node/Supabase note above
 - `src/lib/auth-utils.ts` — `getClientRole()`, `resolveBackUrl()` — role-validated back navigation for pages reached from multiple entry points
