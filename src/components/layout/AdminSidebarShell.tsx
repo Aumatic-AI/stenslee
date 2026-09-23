@@ -105,6 +105,12 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
   // once, on the very first load — not on every in-app navigation.
   const [admin, setAdmin] = useState<AdminIdentity | null | undefined>(undefined);
   const [trashCount, setTrashCount] = useState(0);
+  // Set the instant logout is clicked, before signOut() even resolves --
+  // without this, the SIGNED_OUT auth event flips `admin` to null a beat
+  // before router.push("/studio/login") actually lands, and in that gap
+  // this shell renders bare `children` (the admin page's own loading
+  // skeleton, sidebar-less) instead of a clean transition.
+  const [loggingOut, setLoggingOut] = useState(false);
 
   // Unseen-count badge for Recently Deleted — re-fetched on every navigation
   // (not just once at mount) so it clears once the admin has actually opened
@@ -164,13 +170,14 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
     return <>{children}</>;
   }
 
-  // Brief branded splash while the very first role check is in flight — this
-  // shell lives in the root layout and mounts once per hard page load, so
-  // this only ever appears on a fresh app load, never on in-app navigation.
-  // Same markup as the root "/" splash (src/app/page.tsx) — that one only
-  // ever showed for visits to "/" itself, never for a deep link straight
-  // into e.g. /studio/admin/sessions/xyz, which is what this covers.
-  if (admin === undefined) {
+  // Brief branded splash while the very first role check is in flight, and
+  // again while signing out -- both are "we don't yet know / no longer have
+  // a page to show" moments, so they share one full-page takeover with no
+  // sidebar. This shell lives in the root layout and mounts once per hard
+  // page load, so the first-load case only ever appears on a fresh app
+  // load, never on in-app navigation. Covers a deep link straight into e.g.
+  // /studio/admin/sessions/xyz just as much as "/" itself.
+  if (admin === undefined || loggingOut) {
     return (
       <main className="min-h-[100dvh] bg-bg flex flex-col items-center justify-center px-5 relative overflow-hidden">
         <div
@@ -240,6 +247,7 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
   }
 
   async function handleLogout() {
+    setLoggingOut(true);
     // scope: "local" clears this device's session without a server round
     // trip — a dropped connection there must never leave the cookie intact.
     await supabase.auth.signOut({ scope: "local" });
