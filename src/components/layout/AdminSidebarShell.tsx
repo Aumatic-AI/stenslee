@@ -138,9 +138,11 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
   useEffect(() => {
     if (pathname === "/studio/login") return;
     let cancelled = false;
+    let lastUserId: string | null = null;
 
     async function check() {
       const { data: { user } } = await supabase.auth.getUser();
+      lastUserId = user?.id ?? null;
       if (!user) { if (!cancelled) setAdmin(null); return; }
 
       const { data: staff } = await supabase
@@ -159,14 +161,19 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
     // keep showing the previous session's sidebar since this effect never
     // re-runs on its own.
     //
-    // Deliberately NOT reacting to every event here (e.g. TOKEN_REFRESHED) --
-    // Supabase's client also fires that on its own whenever the browser tab
-    // regains focus (it pauses its refresh timer while hidden and
-    // re-validates on visibility regain), which re-ran this check (and
-    // every other subscriber's own re-fetch) on every tab-switch, for no
-    // actual auth change.
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "SIGNED_IN" || event === "SIGNED_OUT") check();
+    // Also checks the user id actually changed on SIGNED_IN -- Supabase's
+    // client re-fires SIGNED_IN on its own for the *same* already-logged-in
+    // user whenever the browser tab regains focus (its internal
+    // session-recovery check on visibility regain notifies subscribers
+    // again even when nothing changed), which re-ran this check (and every
+    // other subscriber's own re-fetch) on every tab-switch, for no actual
+    // auth change.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_OUT") { check(); return; }
+      if (event === "SIGNED_IN") {
+        const userId = session?.user?.id ?? null;
+        if (userId && userId !== lastUserId) check();
+      }
     });
 
     return () => { cancelled = true; subscription.unsubscribe(); };

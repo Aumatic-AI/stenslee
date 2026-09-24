@@ -7,28 +7,41 @@ import { usePermissionStore } from "@/store/permission-store";
 // Headless -- renders nothing, just triggers the permission fetch. Mounted
 // once in the root layout, so it fires once per hard page load / reopened
 // tab (the confirmed refresh policy -- no localStorage cache, no polling),
-// plus again if a *different* staff member signs in without a full reload
-// (SIGNED_IN), or clears on sign-out.
+// plus again if a *different* staff member signs in without a full reload,
+// or clears on sign-out.
 //
-// Deliberately narrowed to just SIGNED_IN/SIGNED_OUT -- Supabase's client
-// also fires TOKEN_REFRESHED/INITIAL_SESSION on its own, including every
-// time the browser tab regains focus (it pauses its refresh timer while
-// hidden and re-validates on visibility regain). Reacting to those too
-// re-ran this fetch (and every other subscriber's own re-fetch) on every
-// tab-switch, for no actual permission change.
+// Narrowed to SIGNED_IN/SIGNED_OUT, AND checks the user id actually
+// changed -- Supabase's client re-fires SIGNED_IN on its own for the
+// *same* already-logged-in user whenever the browser tab regains focus
+// (its internal session-recovery check on visibility regain notifies
+// subscribers again even when nothing changed). Reacting to every
+// SIGNED_IN re-ran this fetch (and every other subscriber's own re-fetch)
+// on every tab-switch, for no actual permission change.
 export default function PermissionBootstrap() {
   const fetchPermissions = usePermissionStore((s) => s.fetchPermissions);
   const clear = usePermissionStore((s) => s.clear);
 
   useEffect(() => {
     const supabase = createSupabaseBrowserClient();
-    fetchPermissions();
+    let lastUserId: string | null = null;
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      lastUserId = user?.id ?? null;
+      fetchPermissions();
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_OUT") {
+        lastUserId = null;
         clear();
-      } else if (event === "SIGNED_IN") {
-        fetchPermissions();
+        return;
+      }
+      if (event === "SIGNED_IN") {
+        const userId = session?.user?.id ?? null;
+        if (userId && userId !== lastUserId) {
+          lastUserId = userId;
+          fetchPermissions();
+        }
       }
     });
 
