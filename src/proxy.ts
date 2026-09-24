@@ -23,6 +23,10 @@ function makeSupabaseClient(request: NextRequest, response: { current: NextRespo
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      // Must match src/lib/supabase-client.ts and supabase-server.ts exactly
+      // -- see the comment in supabase-client.ts for why this app doesn't
+      // use the @supabase/ssr default cookie name.
+      cookieOptions: { name: "sb-cleopatra-studio-auth" },
       cookies: {
         getAll() { return request.cookies.getAll(); },
         setAll(cookiesToSet) {

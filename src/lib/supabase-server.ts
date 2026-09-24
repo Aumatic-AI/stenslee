@@ -7,10 +7,14 @@ import { createClient } from "@supabase/supabase-js";
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-// Server Component / Route Handler client (reads session from cookies)
+// Server Component / Route Handler client (reads session from cookies).
+// cookieOptions.name must match supabase-client.ts and proxy.ts exactly --
+// see the comment there for why this app doesn't use the @supabase/ssr
+// default cookie name.
 export async function createSupabaseServerClient() {
   const cookieStore = await cookies();
   return createServerClient(url, anonKey, {
+    cookieOptions: { name: "sb-cleopatra-studio-auth" },
     cookies: {
       getAll() { return cookieStore.getAll(); },
       setAll(cookiesToSet) {
