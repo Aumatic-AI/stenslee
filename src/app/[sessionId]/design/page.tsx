@@ -54,10 +54,12 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
   const cameraFeature = useFeature("camera_capture");
   const pinterestFeature = useFeature("pinterest_search");
   const browsePreviousFeature = useFeature("browse_previous");
+  const textTattooFeature = useFeature("text_tattoo");
   // Treat "still loading" as enabled — avoids a flash of disabled controls
   // before the permission store's first fetch resolves.
   const cameraFeatureEnabled = cameraFeature.loading || cameraFeature.enabled;
   const pinterestFeatureEnabled = pinterestFeature.loading || pinterestFeature.enabled;
+  const textTattooFeatureEnabled = textTattooFeature.loading || textTattooFeature.enabled;
 
   // Coming back to the same session already live in the store (e.g. from
   // Chat) — restore the tab/photo/mode instead of resetting to a blank form.
@@ -860,14 +862,19 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
                 Text Tattoo Mode
               </p>
               <p className="text-muted text-[10px] mt-0.5 leading-snug">
-                {isTextTattoo
+                {!textTattooFeatureEnabled
+                  ? "Not available on your plan"
+                  : isTextTattoo
                   ? "Uses a text-optimised model — accurate fonts, lettering & mixed elements"
                   : "Turn on if the tattoo contains words, names, quotes, or lettering"}
               </p>
             </div>
             <button
               type="button"
+              disabled={!textTattooFeatureEnabled}
+              title={!textTattooFeatureEnabled ? "Not available on your plan" : undefined}
               onClick={() => {
+                if (!textTattooFeatureEnabled) return;
                 const next = !isTextTattoo;
                 setIsTextTattoo(next);
                 if (next) {
@@ -885,10 +892,12 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
                 }
               }}
               aria-pressed={isTextTattoo}
-              className={`flex-shrink-0 w-11 h-6 rounded-full border transition-colors cursor-pointer flex items-center px-0.5 ${
-                isTextTattoo
-                  ? "bg-gold border-gold justify-end"
-                  : "bg-surface-2 border-cleo-border justify-start"
+              className={`flex-shrink-0 w-11 h-6 rounded-full border transition-colors flex items-center px-0.5 ${
+                !textTattooFeatureEnabled
+                  ? "bg-surface-2 border-cleo-border opacity-40 cursor-not-allowed justify-start"
+                  : isTextTattoo
+                  ? "bg-gold border-gold justify-end cursor-pointer"
+                  : "bg-surface-2 border-cleo-border justify-start cursor-pointer"
               }`}
             >
               <span className={`w-5 h-5 rounded-full shadow transition-all ${isTextTattoo ? "bg-bg" : "bg-muted"}`} />
