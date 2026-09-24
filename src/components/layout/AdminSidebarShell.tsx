@@ -153,13 +153,20 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
     }
     check();
 
-    // Re-validate on any real auth change (sign-in, sign-out, token refresh)
-    // — a one-time mount check alone goes stale the moment a different
-    // account signs in in the same tab (e.g. admin logs out, a designer logs
-    // in): the shell would otherwise keep showing the previous session's
-    // sidebar since this effect never re-runs on its own.
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
-      check();
+    // Re-validate on a real sign-in/sign-out — a one-time mount check alone
+    // goes stale the moment a different account signs in in the same tab
+    // (e.g. admin logs out, a designer logs in): the shell would otherwise
+    // keep showing the previous session's sidebar since this effect never
+    // re-runs on its own.
+    //
+    // Deliberately NOT reacting to every event here (e.g. TOKEN_REFRESHED) --
+    // Supabase's client also fires that on its own whenever the browser tab
+    // regains focus (it pauses its refresh timer while hidden and
+    // re-validates on visibility regain), which re-ran this check (and
+    // every other subscriber's own re-fetch) on every tab-switch, for no
+    // actual auth change.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_IN" || event === "SIGNED_OUT") check();
     });
 
     return () => { cancelled = true; subscription.unsubscribe(); };
