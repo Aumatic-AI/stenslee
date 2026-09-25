@@ -69,6 +69,11 @@ const TRASH_NAV_ITEM = {
 };
 const ALL_NAV_ITEMS = [...NAV_ITEMS, TRASH_NAV_ITEM];
 
+// Persists across client-side navigation (same JS runtime) but resets on a
+// genuine page load/reload -- that's what makes the splash below appear only
+// then, never after a login redirect or on logout.
+let hasCheckedAccessOnce = false;
+
 function NavBadge({ count }: { count: number }) {
   if (count <= 0) return null;
   return (
@@ -105,11 +110,6 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
   // once, on the very first load — not on every in-app navigation.
   const [admin, setAdmin] = useState<AdminIdentity | null | undefined>(undefined);
   const [trashCount, setTrashCount] = useState(0);
-  // Set immediately on logout so the splash covers the transition cleanly.
-  const [loggingOut, setLoggingOut] = useState(false);
-  // True only if this mount's very first pathname was the login page --
-  // i.e. we got here via a post-login redirect, not a fresh load/reload.
-  const [cameFromLogin] = useState(() => pathname === "/studio/login");
 
   // Unseen-count badge for Recently Deleted — re-fetched on every navigation
   // (not just once at mount) so it clears once the admin has actually opened
@@ -144,7 +144,7 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
       try {
         const { data: { user } } = await supabase.auth.getUser();
         lastUserId = user?.id ?? null;
-        if (!user) { if (!cancelled) setAdmin(null); return; }
+        if (!user) { if (!cancelled) setAdmin(null); hasCheckedAccessOnce = true; return; }
 
         const { data: staff } = await supabase
           .from("staff")
@@ -153,9 +153,11 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
           .maybeSingle();
 
         if (!cancelled) setAdmin(staff && staff.role === "admin" && staff.is_active ? staff : null);
+        hasCheckedAccessOnce = true;
       } catch {
         // Network hiccup -- don't leave `admin` stuck at undefined forever.
         if (!cancelled) setAdmin(null);
+        hasCheckedAccessOnce = true;
       }
     }
     check();
@@ -178,10 +180,10 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
     return <>{children}</>;
   }
 
-  // The checking-access case is skipped right after a login redirect
-  // (cameFromLogin) -- only shown on a genuine fresh load/reload, since it
-  // can take a few seconds. Logging out always shows it.
-  if (loggingOut || (!cameFromLogin && admin === undefined)) {
+  // Only shown on a genuine fresh load/reload -- once the first check has
+  // run, `hasCheckedAccessOnce` stays true for the rest of this JS runtime,
+  // so a post-login redirect or a logout never re-shows it.
+  if (!hasCheckedAccessOnce && admin === undefined) {
     return (
       <main className="min-h-[100dvh] bg-bg flex flex-col items-center justify-center px-5 relative overflow-hidden">
         <div
@@ -251,11 +253,12 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
   }
 
   async function handleLogout() {
-    setLoggingOut(true);
+    // Navigate first so the login-page early-return above takes over
+    // immediately, with no in-between frame of unauthorized dashboard content.
+    router.push("/studio/login");
     // scope: "local" clears this device's session without a server round
     // trip — a dropped connection there must never leave the cookie intact.
     await supabase.auth.signOut({ scope: "local" });
-    router.push("/studio/login");
     router.refresh();
   }
 
