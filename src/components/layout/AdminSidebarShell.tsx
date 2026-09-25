@@ -175,7 +175,8 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
     return <>{children}</>;
   }
 
-  // Full-page splash while checking access or signing out -- no sidebar.
+  // Splash disabled for now -- was blocking too long on slow checks.
+  /*
   if (admin === undefined || loggingOut) {
     return (
       <main className="min-h-[100dvh] bg-bg flex flex-col items-center justify-center px-5 relative overflow-hidden">
@@ -240,6 +241,7 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
       </main>
     );
   }
+  */
 
   if (!admin) {
     return <>{children}</>;
