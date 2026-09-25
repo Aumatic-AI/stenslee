@@ -107,6 +107,9 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
   const [trashCount, setTrashCount] = useState(0);
   // Set immediately on logout so the splash covers the transition cleanly.
   const [loggingOut, setLoggingOut] = useState(false);
+  // True only if this mount's very first pathname was the login page --
+  // i.e. we got here via a post-login redirect, not a fresh load/reload.
+  const [cameFromLogin] = useState(() => pathname === "/studio/login");
 
   // Unseen-count badge for Recently Deleted — re-fetched on every navigation
   // (not just once at mount) so it clears once the admin has actually opened
@@ -175,9 +178,10 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
     return <>{children}</>;
   }
 
-  // Splash disabled for now -- was blocking too long on slow checks.
-  /*
-  if (admin === undefined || loggingOut) {
+  // The checking-access case is skipped right after a login redirect
+  // (cameFromLogin) -- only shown on a genuine fresh load/reload, since it
+  // can take a few seconds. Logging out always shows it.
+  if (loggingOut || (!cameFromLogin && admin === undefined)) {
     return (
       <main className="min-h-[100dvh] bg-bg flex flex-col items-center justify-center px-5 relative overflow-hidden">
         <div
@@ -225,7 +229,7 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
               <div className="flex-1 h-px bg-gradient-to-l from-transparent to-gold/40" />
             </div>
             <p className="text-muted text-xs tracking-[0.18em] uppercase font-cinzel">
-              AI-Powered Tattoo Design
+              Custom Tattoo Designs
             </p>
           </div>
 
@@ -241,7 +245,6 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
       </main>
     );
   }
-  */
 
   if (!admin) {
     return <>{children}</>;
