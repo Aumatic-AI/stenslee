@@ -105,11 +105,7 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
   // once, on the very first load — not on every in-app navigation.
   const [admin, setAdmin] = useState<AdminIdentity | null | undefined>(undefined);
   const [trashCount, setTrashCount] = useState(0);
-  // Set the instant logout is clicked, before signOut() even resolves --
-  // without this, the SIGNED_OUT auth event flips `admin` to null a beat
-  // before router.push("/studio/login") actually lands, and in that gap
-  // this shell renders bare `children` (the admin page's own loading
-  // skeleton, sidebar-less) instead of a clean transition.
+  // Set immediately on logout so the splash covers the transition cleanly.
   const [loggingOut, setLoggingOut] = useState(false);
 
   // Unseen-count badge for Recently Deleted — re-fetched on every navigation
@@ -136,46 +132,33 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
   }, [admin, pathname]);
 
   useEffect(() => {
-    // Deliberately NOT skipped for the login pathname -- this shell mounts
-    // once per hard page load (see the comment above), and the common case
-    // for a fresh visit is landing on /studio/login first. Skipping setup
-    // there meant the onAuthStateChange subscription below never got
-    // created for that page load; a subsequent client-side sign-in fired
-    // SIGNED_IN with nobody listening, so `admin` stayed `undefined`
-    // forever after router.push("/studio/admin") -- layouts don't remount
-    // on client-side navigation -- showing the loading splash permanently
-    // until a manual reload remounted the shell fresh, already past login.
+    // Runs even on the login pathname now -- skipping it there used to skip
+    // setting up the subscription below too, for that whole page load.
     let cancelled = false;
     let lastUserId: string | null = null;
 
     async function check() {
-      const { data: { user } } = await supabase.auth.getUser();
-      lastUserId = user?.id ?? null;
-      if (!user) { if (!cancelled) setAdmin(null); return; }
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        lastUserId = user?.id ?? null;
+        if (!user) { if (!cancelled) setAdmin(null); return; }
 
-      const { data: staff } = await supabase
-        .from("staff")
-        .select("name, role, is_active, avatar_url")
-        .eq("id", user.id)
-        .maybeSingle();
+        const { data: staff } = await supabase
+          .from("staff")
+          .select("name, role, is_active, avatar_url")
+          .eq("id", user.id)
+          .maybeSingle();
 
-      if (!cancelled) setAdmin(staff && staff.role === "admin" && staff.is_active ? staff : null);
+        if (!cancelled) setAdmin(staff && staff.role === "admin" && staff.is_active ? staff : null);
+      } catch {
+        // Network hiccup -- don't leave `admin` stuck at undefined forever.
+        if (!cancelled) setAdmin(null);
+      }
     }
     check();
 
-    // Re-validate on a real sign-in/sign-out — a one-time mount check alone
-    // goes stale the moment a different account signs in in the same tab
-    // (e.g. admin logs out, a designer logs in): the shell would otherwise
-    // keep showing the previous session's sidebar since this effect never
-    // re-runs on its own.
-    //
-    // Also checks the user id actually changed on SIGNED_IN -- Supabase's
-    // client re-fires SIGNED_IN on its own for the *same* already-logged-in
-    // user whenever the browser tab regains focus (its internal
-    // session-recovery check on visibility regain notifies subscribers
-    // again even when nothing changed), which re-ran this check (and every
-    // other subscriber's own re-fetch) on every tab-switch, for no actual
-    // auth change.
+    // Only re-check on a real sign-in/sign-out with a changed user id --
+    // Supabase re-fires SIGNED_IN for the same user on tab focus regain.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_OUT") { check(); return; }
       if (event === "SIGNED_IN") {
@@ -192,13 +175,7 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
     return <>{children}</>;
   }
 
-  // Brief branded splash while the very first role check is in flight, and
-  // again while signing out -- both are "we don't yet know / no longer have
-  // a page to show" moments, so they share one full-page takeover with no
-  // sidebar. This shell lives in the root layout and mounts once per hard
-  // page load, so the first-load case only ever appears on a fresh app
-  // load, never on in-app navigation. Covers a deep link straight into e.g.
-  // /studio/admin/sessions/xyz just as much as "/" itself.
+  // Full-page splash while checking access or signing out -- no sidebar.
   if (admin === undefined || loggingOut) {
     return (
       <main className="min-h-[100dvh] bg-bg flex flex-col items-center justify-center px-5 relative overflow-hidden">
