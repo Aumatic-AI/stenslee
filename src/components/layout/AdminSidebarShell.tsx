@@ -136,7 +136,15 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
   }, [admin, pathname]);
 
   useEffect(() => {
-    if (pathname === "/studio/login") return;
+    // Deliberately NOT skipped for the login pathname -- this shell mounts
+    // once per hard page load (see the comment above), and the common case
+    // for a fresh visit is landing on /studio/login first. Skipping setup
+    // there meant the onAuthStateChange subscription below never got
+    // created for that page load; a subsequent client-side sign-in fired
+    // SIGNED_IN with nobody listening, so `admin` stayed `undefined`
+    // forever after router.push("/studio/admin") -- layouts don't remount
+    // on client-side navigation -- showing the loading splash permanently
+    // until a manual reload remounted the shell fresh, already past login.
     let cancelled = false;
     let lastUserId: string | null = null;
 
