@@ -372,7 +372,7 @@ export const useAppStore = create<AppState>()(
     if (!sessionId || !design.imageUrl) return;
     await supabase
       .from("sessions")
-      .update({ selected_design_url: design.imageUrl, selected_design_style: design.styleName })
+      .update({ selected_design_key: design.imageUrl, selected_design_style: design.styleName })
       .eq("id", sessionId);
   },
 
@@ -383,8 +383,8 @@ export const useAppStore = create<AppState>()(
       .from("sessions")
       .update({
         placement_text: placementText ?? null,
-        placement_body_photo_url: bodyPhotoUrl ?? null,
-        placement_composite_url: compositeUrl ?? null,
+        placement_body_photo_key: bodyPhotoUrl ?? null,
+        placement_composite_key: compositeUrl ?? null,
       })
       .eq("id", sessionId);
   },
@@ -418,7 +418,7 @@ export const useAppStore = create<AppState>()(
     }
 
     // Pull session + customer in one round-trip. Every generated candidate
-    // already lives in chat_messages.image_urls[] (loaded separately by the
+    // already lives in chat_messages.image_keys[] (loaded separately by the
     // chat screen) — this only needs to restore the one design/placement
     // the session has actually settled on, per the v4 schema's 1-to-1 model.
     const { data: session, error } = await supabase
@@ -432,10 +432,10 @@ export const useAppStore = create<AppState>()(
         flow_type,
         rework_mode,
         status,
-        selected_design_url,
+        selected_design_key,
         selected_design_style,
         placement_text,
-        placement_composite_url,
+        placement_composite_key,
         customers ( name, phone )
       `)
       .eq("id", sessionId)
@@ -453,13 +453,13 @@ export const useAppStore = create<AppState>()(
       .eq("session_id", sessionId);
 
     const customer = Array.isArray(session.customers) ? session.customers[0] : session.customers;
-    const selectedDesign: DesignVariant | null = session.selected_design_url
+    const selectedDesign: DesignVariant | null = session.selected_design_key
       ? {
           id: `db-${sessionId}`,
           gradient: defaultGradients[0],
           patternType: "mandala",
           styleName: session.selected_design_style ?? "Design",
-          imageUrl: session.selected_design_url,
+          imageUrl: session.selected_design_key,
         }
       : null;
 
@@ -475,7 +475,7 @@ export const useAppStore = create<AppState>()(
       reworkMode: (session.rework_mode as "cover" | "extend" | null) ?? "cover",
       selectedDesign: selectedDesign ?? get().selectedDesign,
       placementText: session.placement_text ?? "",
-      finalComposite: session.placement_composite_url ?? null,
+      finalComposite: session.placement_composite_key ?? null,
       sessionStatus: (session.status as "active" | "completed" | "abandoned") ?? "active",
       hydratedSessionId: sessionId,
       hasChatHistory: (chatMessageCount ?? 0) > 0,

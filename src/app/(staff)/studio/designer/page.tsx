@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 import { useAppStore } from "@/store/app-store";
 import type { StaffMember } from "@/lib/staff-types";
+import { getStorageUrl } from "@/lib/image-src";
 import { useFeature } from "@/lib/permissions/use-feature";
 import { FeatureLocked } from "@/components/ui/FeatureLocked";
 
@@ -65,7 +66,7 @@ export default function DesignerDashboard() {
 
       const { data: staffRow } = await supabase
         .from("staff")
-        .select("id, email, name, role, is_active, created_at, avatar_url")
+        .select("id, email, name, role, is_active, created_at, avatar_key")
         .eq("id", user.id)
         .maybeSingle();
 
@@ -236,8 +237,8 @@ export default function DesignerDashboard() {
           {staff && (
             <Link href="/studio/designer/settings" className="hidden sm:flex items-center gap-2.5 group">
               <div className="w-8 h-8 rounded-full bg-gold/10 border border-gold/30 group-hover:border-gold transition-colors flex items-center justify-center overflow-hidden flex-shrink-0 relative">
-                {staff.avatar_url ? (
-                  <Image src={staff.avatar_url} alt={staff.name} fill unoptimized className="object-cover" />
+                {staff.avatar_key ? (
+                  <Image src={getStorageUrl(staff.avatar_key)!} alt={staff.name} fill unoptimized className="object-cover" />
                 ) : (
                   <span className="font-cinzel text-xs font-black text-gold">{staff.name.charAt(0).toUpperCase()}</span>
                 )}

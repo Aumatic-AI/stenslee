@@ -15,7 +15,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const updates: { name?: string; avatar_url?: string } = {};
+  const updates: { name?: string; avatar_key?: string } = {};
 
   if (typeof name === "string" && name.trim()) {
     updates.name = name.trim();
@@ -23,7 +23,7 @@ export async function PATCH(req: NextRequest) {
 
   if (typeof avatarBase64 === "string" && avatarBase64) {
     try {
-      updates.avatar_url = await uploadBase64(avatarBase64, targetId, "avatars");
+      updates.avatar_key = await uploadBase64(avatarBase64, targetId, "avatars");
     } catch (err) {
       return NextResponse.json({ error: (err as Error).message }, { status: 500 });
     }
@@ -38,7 +38,7 @@ export async function PATCH(req: NextRequest) {
     .from("staff")
     .update(updates)
     .eq("id", targetId)
-    .select("id, name, avatar_url")
+    .select("id, name, avatar_key")
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

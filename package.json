@@ -13,6 +13,7 @@
     "@supabase/supabase-js": "^2.105.4",
     "framer-motion": "^12.38.0",
     "jspdf": "^4.2.1",
+    "jszip": "^3.10.2",
     "next": "16.2.6",
     "react": "19.2.4",
     "react-colorful": "^5.8.1",

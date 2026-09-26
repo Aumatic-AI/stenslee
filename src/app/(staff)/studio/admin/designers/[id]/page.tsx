@@ -7,6 +7,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 import type { StaffMember } from "@/lib/staff-types";
+import { getStorageUrl, resolveImageSrc } from "@/lib/image-src";
 
 interface SessionRow {
   id: string;
@@ -16,7 +17,7 @@ interface SessionRow {
   created_at: string;
   completed_at: string | null;
   customers: { name: string; phone: string } | null;
-  selected_design_url: string | null;
+  selected_design_key: string | null;
   selected_design_style: string | null;
 }
 
@@ -24,7 +25,7 @@ function TattooThumb({ url }: { url: string }) {
   const [err, setErr] = useState(false);
   if (err) return <div className="w-full h-full flex items-center justify-center"><span className="text-muted/30 text-xl">✦</span></div>;
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src={url} alt="Design" className="w-full h-full object-cover" onError={() => setErr(true)} />;
+  return <img src={resolveImageSrc(url)} alt="Design" className="w-full h-full object-cover" onError={() => setErr(true)} />;
 }
 
 function DesignerDetailSkeleton() {
@@ -113,7 +114,7 @@ export default function DesignerDetailPage({ params }: { params: Promise<{ id: s
     setEditName(designer.name);
     setEditEmail(designer.email);
     setEditActive(designer.is_active);
-    setEditAvatarPreview(designer.avatar_url ?? null);
+    setEditAvatarPreview(getStorageUrl(designer.avatar_key));
     setEditAvatarBase64(null);
     setEditError("");
     setEditOpen(true);
@@ -191,7 +192,7 @@ export default function DesignerDetailPage({ params }: { params: Promise<{ id: s
         .from("staff")
         .update(updates)
         .eq("id", designer.id)
-        .select("id, email, name, role, is_active, created_at, avatar_url")
+        .select("id, email, name, role, is_active, created_at, avatar_key")
         .single();
 
       if (error) {
@@ -267,7 +268,7 @@ export default function DesignerDetailPage({ params }: { params: Promise<{ id: s
       const [designerRes, sessionsRes] = await Promise.all([
         supabase
           .from("staff")
-          .select("id, email, name, role, is_active, created_at, avatar_url")
+          .select("id, email, name, role, is_active, created_at, avatar_key")
           .eq("id", id)
           .maybeSingle(),
         supabase
@@ -275,7 +276,7 @@ export default function DesignerDetailPage({ params }: { params: Promise<{ id: s
           .select(`
             id, style, description, status, created_at, completed_at,
             customers(name, phone),
-            selected_design_url, selected_design_style
+            selected_design_key, selected_design_style
           `)
           .eq("staff_id", id)
           .is("deleted_at", null)
@@ -329,8 +330,8 @@ export default function DesignerDetailPage({ params }: { params: Promise<{ id: s
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
           className="bg-surface border border-cleo-border rounded-2xl p-5 sm:p-6 flex items-center gap-5">
           <div className="relative w-14 h-14 rounded-full bg-gold/10 border border-gold/30 flex items-center justify-center flex-shrink-0 overflow-hidden">
-            {designer?.avatar_url ? (
-              <Image src={designer.avatar_url} alt={designer.name} fill unoptimized className="object-cover" />
+            {designer?.avatar_key ? (
+              <Image src={getStorageUrl(designer.avatar_key)!} alt={designer.name} fill unoptimized className="object-cover" />
             ) : (
               <span className="font-cinzel text-2xl font-black text-gold">{designer?.name.charAt(0).toUpperCase()}</span>
             )}
@@ -490,7 +491,7 @@ export default function DesignerDetailPage({ params }: { params: Promise<{ id: s
           {[
             { label: "Completed", value: completedSessions.length, color: "text-success" },
             { label: "In Progress", value: activeSessions.length, color: "text-gold" },
-            { label: "Total Designs", value: sessions.filter((s) => s.selected_design_url).length, color: "text-ink" },
+            { label: "Total Designs", value: sessions.filter((s) => s.selected_design_key).length, color: "text-ink" },
           ].map((stat) => (
             <div key={stat.label} className="bg-surface border border-cleo-border rounded-xl p-4 text-center">
               <p className={`font-cinzel text-2xl font-black leading-none ${stat.color}`}>{stat.value}</p>
@@ -527,9 +528,9 @@ export default function DesignerDetailPage({ params }: { params: Promise<{ id: s
                     <div className="p-4 flex gap-4">
                       {/* Design thumbnail */}
                       <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-xl overflow-hidden bg-surface-2 border border-cleo-border flex-shrink-0">
-                        {s.selected_design_url ? (
-                          <button type="button" onClick={() => setViewingImage(s.selected_design_url!)} className="w-full h-full cursor-pointer hover:opacity-80 transition-opacity">
-                            <TattooThumb url={s.selected_design_url} />
+                        {s.selected_design_key ? (
+                          <button type="button" onClick={() => setViewingImage(s.selected_design_key!)} className="w-full h-full cursor-pointer hover:opacity-80 transition-opacity">
+                            <TattooThumb url={s.selected_design_key} />
                           </button>
                         ) : (
                           <div className="w-full h-full flex items-center justify-center">
@@ -715,7 +716,7 @@ export default function DesignerDetailPage({ params }: { params: Promise<{ id: s
               onClick={(e) => e.stopPropagation()}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={viewingImage} alt="Design Fullscreen" className="w-full h-full object-contain" />
+              <img src={resolveImageSrc(viewingImage)} alt="Design Fullscreen" className="w-full h-full object-contain" />
             </motion.div>
           </motion.div>
         )}

@@ -139,9 +139,9 @@ export default function AdminDashboard() {
         .select(`
           id, status, created_at,
           customers(name), designer:staff_id(name),
-          selected_design_url, selected_design_style, placement_composite_url
+          selected_design_key, selected_design_style, placement_composite_key
         `, { count: "exact" })
-        .not("selected_design_url", "is", null)
+        .not("selected_design_key", "is", null)
         .is("deleted_at", null)
         .order("created_at", { ascending: false })
         .range(0, WORK_PAGE_SIZE - 1),
@@ -229,9 +229,9 @@ export default function AdminDashboard() {
       .select(`
         id, status, created_at,
         customers(name), designer:staff_id(name),
-        selected_design_url, selected_design_style, placement_composite_url
+        selected_design_key, selected_design_style, placement_composite_key
       `)
-      .not("selected_design_url", "is", null)
+      .not("selected_design_key", "is", null)
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
       .range(work.length, work.length + WORK_PAGE_SIZE - 1);
@@ -569,7 +569,7 @@ function mapWorkRow(r: any): WorkItem {
   const designer = Array.isArray(r.designer) ? r.designer[0] : r.designer;
   return {
     id: r.id,
-    imageUrl: r.placement_composite_url ?? r.selected_design_url,
+    imageUrl: r.placement_composite_key ?? r.selected_design_key,
     styleName: r.selected_design_style ?? null,
     customerName: customer?.name ?? "Unknown",
     designerName: designer?.name ?? "Unassigned",

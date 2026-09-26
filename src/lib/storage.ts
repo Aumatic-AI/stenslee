@@ -35,7 +35,12 @@ async function uploadWithRetry(path: string, buffer: Buffer, contentType: string
   throw new Error(`Storage upload failed: ${lastError?.message}`);
 }
 
-/** Upload a base64-encoded image (with or without data-URI prefix) to Supabase Storage. */
+/**
+ * Upload a base64-encoded image (with or without data-URI prefix) to Supabase
+ * Storage. Returns a bare storage key ("<bucket>/<path>"), not a full URL —
+ * resolve it with resolveImageSrc()/toPublicUrl() wherever it's displayed or
+ * sent to an external API.
+ */
 export async function uploadBase64(
   base64Data: string,
   sessionId: string | undefined,
@@ -50,10 +55,13 @@ export async function uploadBase64(
 
   await uploadWithRetry(path, buffer, contentType);
 
-  return createServiceClient().storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+  return `${BUCKET}/${path}`;
 }
 
-/** Fetch a remote URL (e.g. KEI tempfile) and re-upload it to Supabase Storage. */
+/**
+ * Fetch a remote URL (e.g. KEI tempfile) and re-upload it to Supabase
+ * Storage. Returns a bare storage key, same as uploadBase64.
+ */
 export async function uploadFromUrl(
   sourceUrl: string,
   sessionId: string | undefined,
@@ -68,5 +76,5 @@ export async function uploadFromUrl(
 
   await uploadWithRetry(path, buffer, contentType);
 
-  return createServiceClient().storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+  return `${BUCKET}/${path}`;
 }

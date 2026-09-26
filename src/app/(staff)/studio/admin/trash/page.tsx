@@ -6,6 +6,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 import { useFeature } from "@/lib/permissions/use-feature";
+import { resolveImageSrc } from "@/lib/image-src";
+import { restoreLibraryFile, purgeLibraryFile, formatBytes } from "@/lib/library-storage";
 
 const PAGE_SIZE = 15;
 // Fallback only -- the real value is this org's trash_retention plan limit,
@@ -20,6 +22,22 @@ interface TrashRow {
   deleted_at: string;
   customerName: string;
   designerName: string;
+  isNew: boolean;
+}
+
+// A trashed folder never shows up as its own row here -- deleting a folder
+// trashes every file inside it individually (see trashLibraryFolder), so
+// each image is its own restorable row, tagged with the folder path it came
+// from (which may itself still be soft-deleted -- restoring the file brings
+// that folder back too, wherever it was).
+interface LibraryTrashRow {
+  id: string;
+  fileName: string;
+  storageKey: string;
+  sizeBytes: number;
+  deletedAt: string;
+  folderId: string | null;
+  folderPath: string;
   isNew: boolean;
 }
 
@@ -47,6 +65,14 @@ export default function TrashPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  const [libraryLoading, setLibraryLoading] = useState(true);
+  const [libraryRows, setLibraryRows] = useState<LibraryTrashRow[]>([]);
+  const [libraryTotalCount, setLibraryTotalCount] = useState(0);
+  const [libraryLoadingMore, setLibraryLoadingMore] = useState(false);
+  const [libraryRestoringId, setLibraryRestoringId] = useState<string | null>(null);
+  const [libraryDeletingId, setLibraryDeletingId] = useState<string | null>(null);
+  const [libraryConfirmingDeleteId, setLibraryConfirmingDeleteId] = useState<string | null>(null);
 
   // Captured once at load, before we overwrite trash_last_viewed_at — rows
   // soft-deleted after this moment are "new since last visit".
@@ -78,6 +104,55 @@ export default function TrashPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Resolves a folder's display path by walking parent_folder_id up to the
+  // root, regardless of whether an ancestor is itself currently
+  // soft-deleted (deleting a folder trashes it too -- this just wants its
+  // name for display, not to gate on it).
+  const folderPathCache = useState(() => new Map<string, string>())[0];
+  const resolveFolderPath = useCallback(async (folderId: string | null): Promise<string> => {
+    if (!folderId) return "Library root";
+    const cached = folderPathCache.get(folderId);
+    if (cached) return cached;
+    const names: string[] = [];
+    let cursor: string | null = folderId;
+    while (cursor) {
+      const result: { data: { name: string; parent_folder_id: string | null } | null } =
+        await supabase.from("folders").select("name, parent_folder_id").eq("id", cursor).maybeSingle();
+      if (!result.data) break;
+      names.unshift(result.data.name);
+      cursor = result.data.parent_folder_id;
+    }
+    const path = names.length > 0 ? names.join(" / ") : "Library root";
+    folderPathCache.set(folderId, path);
+    return path;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const loadLibraryPage = useCallback(async (offset: number, cutoff: string | null) => {
+    const { data, count } = await supabase
+      .from("folder_files")
+      .select("id, file_name, storage_key, file_size_bytes, deleted_at, folder_id", { count: "exact" })
+      .not("deleted_at", "is", null)
+      .order("deleted_at", { ascending: false })
+      .range(offset, offset + PAGE_SIZE - 1);
+
+    const rows: LibraryTrashRow[] = [];
+    for (const r of data ?? []) {
+      rows.push({
+        id: r.id,
+        fileName: r.file_name,
+        storageKey: r.storage_key,
+        sizeBytes: r.file_size_bytes,
+        deletedAt: r.deleted_at,
+        folderId: r.folder_id,
+        folderPath: await resolveFolderPath(r.folder_id),
+        isNew: cutoff ? new Date(r.deleted_at).getTime() > new Date(cutoff).getTime() : true,
+      });
+    }
+    return { rows, count: count ?? 0 };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -98,6 +173,12 @@ export default function TrashPage() {
       setTotalCount(count);
       setLoading(false);
 
+      const { rows: libraryFirstPage, count: libraryCount } = await loadLibraryPage(0, cutoff);
+      if (cancelled) return;
+      setLibraryRows(libraryFirstPage);
+      setLibraryTotalCount(libraryCount);
+      setLibraryLoading(false);
+
       // Mark as viewed now that we've captured the old cutoff for
       // highlighting — clears the sidebar badge for next time.
       await supabase.from("staff").update({ trash_last_viewed_at: new Date().toISOString() }).eq("id", user.id);
@@ -112,6 +193,41 @@ export default function TrashPage() {
     const { rows: nextPage } = await loadPage(rows.length, lastViewedAt);
     setRows((prev) => [...prev, ...nextPage]);
     setLoadingMore(false);
+  }
+
+  async function handleLoadMoreLibrary() {
+    if (libraryLoadingMore) return;
+    setLibraryLoadingMore(true);
+    const { rows: nextPage } = await loadLibraryPage(libraryRows.length, lastViewedAt);
+    setLibraryRows((prev) => [...prev, ...nextPage]);
+    setLibraryLoadingMore(false);
+  }
+
+  async function handleRestoreLibrary(row: LibraryTrashRow) {
+    setLibraryRestoringId(row.id);
+    setActionError(null);
+    try {
+      await restoreLibraryFile(supabase, { id: row.id, folder_id: row.folderId });
+      setLibraryRows((prev) => prev.filter((r) => r.id !== row.id));
+      setLibraryTotalCount((c) => Math.max(0, c - 1));
+    } catch (err) {
+      setActionError((err as Error).message);
+    }
+    setLibraryRestoringId(null);
+  }
+
+  async function handleHardDeleteLibrary(row: LibraryTrashRow) {
+    setLibraryDeletingId(row.id);
+    setActionError(null);
+    try {
+      await purgeLibraryFile(supabase, { id: row.id, storage_key: row.storageKey });
+      setLibraryRows((prev) => prev.filter((r) => r.id !== row.id));
+      setLibraryTotalCount((c) => Math.max(0, c - 1));
+    } catch (err) {
+      setActionError((err as Error).message);
+    }
+    setLibraryDeletingId(null);
+    setLibraryConfirmingDeleteId(null);
   }
 
   // Live search by customer name — same ilike-on-join pattern as elsewhere,
@@ -178,11 +294,13 @@ export default function TrashPage() {
 
   return (
     <div className="flex-1 px-4 sm:px-6 py-6 sm:py-8 max-w-3xl mx-auto w-full flex flex-col gap-5">
+      <div>
+        <p className="text-gold text-[11px] font-mono tracking-[0.2em] uppercase mb-1">Studio Records</p>
+        <h1 className="font-cinzel text-2xl font-black text-ink">Trash</h1>
+      </div>
+
       <div className="flex items-center gap-3">
-        <div>
-          <p className="text-gold text-[11px] font-mono tracking-[0.2em] uppercase mb-1">Studio Records</p>
-          <h1 className="font-cinzel text-2xl font-black text-ink">Recently Deleted</h1>
-        </div>
+        <h2 className="font-cinzel text-sm font-bold tracking-[0.15em] text-muted uppercase">Sessions</h2>
         <span className="ml-auto text-[10px] font-mono text-muted bg-surface border border-cleo-border px-2.5 py-1 rounded-full">
           {searching ? "Searching…" : isSearchMode ? `${displayed.length} match${displayed.length === 1 ? "" : "es"}` : `${rows.length} of ${totalCount}`}
         </span>
@@ -240,7 +358,7 @@ export default function TrashPage() {
         <div className="bg-surface border border-cleo-border rounded-2xl p-10 flex flex-col items-center gap-3 text-center">
           <span className="text-3xl text-muted/20">✦</span>
           <p className="text-muted text-sm">
-            {isSearchMode ? `No deleted sessions match "${query}"` : "Nothing in Recently Deleted."}
+            {isSearchMode ? `No deleted sessions match "${query}"` : "No deleted sessions."}
           </p>
         </div>
       ) : (
@@ -327,6 +445,122 @@ export default function TrashPage() {
               className="mt-1 py-2.5 text-center text-xs font-mono uppercase tracking-widest text-gold hover:text-gold-light border border-cleo-border hover:border-gold/40 rounded-xl transition-colors cursor-pointer disabled:opacity-60"
             >
               {loadingMore ? "Loading…" : "Load More"}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Library files — a deleted folder never shows up here itself, only
+          the individual images that were inside it (see trashLibraryFolder). */}
+      <div className="flex items-center gap-3 mt-2">
+        <h2 className="font-cinzel text-sm font-bold tracking-[0.15em] text-muted uppercase">Library Files</h2>
+        <span className="ml-auto text-[10px] font-mono text-muted bg-surface border border-cleo-border px-2.5 py-1 rounded-full">
+          {libraryRows.length} of {libraryTotalCount}
+        </span>
+      </div>
+
+      {libraryLoading ? (
+        <div className="flex flex-col gap-2">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="bg-surface border border-cleo-border rounded-xl px-4 py-3.5 flex items-center gap-4">
+              <div className="skeleton w-10 h-10 rounded-lg flex-shrink-0" />
+              <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+                <div className="skeleton h-3.5 w-28 rounded" />
+                <div className="skeleton h-2.5 w-40 rounded" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : libraryRows.length === 0 ? (
+        <div className="bg-surface border border-cleo-border rounded-2xl p-10 flex flex-col items-center gap-3 text-center">
+          <span className="text-3xl text-muted/20">✦</span>
+          <p className="text-muted text-sm">No deleted library files.</p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <AnimatePresence mode="popLayout">
+            {libraryRows.map((r) => {
+              const left = daysLeft(r.deletedAt, retentionDays);
+              return (
+                <motion.div
+                  key={r.id}
+                  layout
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.97 }}
+                  className={`bg-surface border rounded-xl px-4 py-3.5 flex items-center gap-3 flex-wrap sm:flex-nowrap ${
+                    r.isNew ? "border-gold/40" : "border-cleo-border"
+                  }`}
+                >
+                  <div className="flex-1 min-w-0 flex items-center gap-3">
+                    {r.isNew && <span className="w-1.5 h-1.5 rounded-full bg-gold flex-shrink-0" title="New since your last visit" />}
+                    <div className="w-10 h-10 rounded-lg overflow-hidden border border-cleo-border flex-shrink-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={resolveImageSrc(r.storageKey)} alt={r.fileName} className="w-full h-full object-cover" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-ink font-semibold truncate">{r.fileName}</p>
+                      <p className="text-muted text-xs font-mono truncate">{r.folderPath} · {formatBytes(r.sizeBytes)}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-shrink-0 ml-auto sm:ml-0">
+                    <span className={`text-[10px] font-mono font-bold uppercase px-2 py-1 rounded-full border ${
+                      left <= 3 ? "text-error border-error/40 bg-error/10" : "text-muted border-cleo-border"
+                    }`}>
+                      {left === 0 ? "Deleting soon" : `${left}d left`}
+                    </span>
+
+                    {libraryConfirmingDeleteId === r.id ? (
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => handleHardDeleteLibrary(r)}
+                          disabled={libraryDeletingId === r.id}
+                          className="h-8 px-3 rounded-lg bg-error/90 border border-error text-white font-cinzel font-bold text-[10px] tracking-widest uppercase hover:bg-error transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          {libraryDeletingId === r.id ? "Deleting…" : "Confirm"}
+                        </button>
+                        <button
+                          onClick={() => setLibraryConfirmingDeleteId(null)}
+                          disabled={libraryDeletingId === r.id}
+                          className="h-8 px-3 rounded-lg bg-surface-2 border border-cleo-border text-muted font-mono text-[10px] uppercase hover:text-ink transition-colors cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => handleRestoreLibrary(r)}
+                          disabled={libraryRestoringId === r.id}
+                          className="h-8 px-3 rounded-lg border border-gold/40 text-gold font-cinzel font-bold text-[10px] tracking-widest uppercase hover:bg-gold/10 transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          {libraryRestoringId === r.id ? "Restoring…" : "Restore"}
+                        </button>
+                        <button
+                          onClick={() => setLibraryConfirmingDeleteId(r.id)}
+                          title="Delete permanently"
+                          aria-label="Delete permanently"
+                          className="w-8 h-8 rounded-lg border border-cleo-border text-muted hover:text-error hover:border-error/40 transition-colors flex items-center justify-center cursor-pointer flex-shrink-0"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
+                          </svg>
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </motion.div>
+              );
+            })}
+          </AnimatePresence>
+          {libraryRows.length < libraryTotalCount && (
+            <button
+              onClick={handleLoadMoreLibrary}
+              disabled={libraryLoadingMore}
+              className="mt-1 py-2.5 text-center text-xs font-mono uppercase tracking-widest text-gold hover:text-gold-light border border-cleo-border hover:border-gold/40 rounded-xl transition-colors cursor-pointer disabled:opacity-60"
+            >
+              {libraryLoadingMore ? "Loading…" : "Load More"}
             </button>
           )}
         </div>

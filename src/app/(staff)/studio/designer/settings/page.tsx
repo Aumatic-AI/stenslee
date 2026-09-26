@@ -6,6 +6,7 @@ import Image from "next/image";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
+import { getStorageUrl } from "@/lib/image-src";
 
 export default function DesignerSettingsPage() {
   const router = useRouter();
@@ -26,13 +27,13 @@ export default function DesignerSettingsPage() {
 
       const { data: staffRow } = await supabase
         .from("staff")
-        .select("name, avatar_url")
+        .select("name, avatar_key")
         .eq("id", user.id)
         .maybeSingle();
 
       if (!staffRow) { router.push("/studio/login"); return; }
       setName(staffRow.name);
-      setAvatarPreview(staffRow.avatar_url ?? null);
+      setAvatarPreview(getStorageUrl(staffRow.avatar_key));
     }
     init();
   // eslint-disable-next-line react-hooks/exhaustive-deps

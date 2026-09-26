@@ -448,7 +448,7 @@ export default function PlacementPage({ params }: { params: Promise<{ sessionId:
                 {selectedDesign?.imageUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={selectedDesign.imageUrl}
+                    src={resolveImageSrc(selectedDesign.imageUrl)}
                     alt={selectedDesign.styleName}
                     className="w-full h-full object-cover"
                   />
@@ -480,7 +480,7 @@ export default function PlacementPage({ params }: { params: Promise<{ sessionId:
               {selectedDesign?.imageUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={selectedDesign.imageUrl}
+                  src={resolveImageSrc(selectedDesign.imageUrl)}
                   alt={selectedDesign.styleName}
                   className="w-full h-full object-contain"
                 />
@@ -743,7 +743,7 @@ export default function PlacementPage({ params }: { params: Promise<{ sessionId:
               <div className="rounded-2xl overflow-hidden border border-gold/20 relative bg-surface-2">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={finalComposite}
+                  src={resolveImageSrc(finalComposite)}
                   alt="Tattoo placement preview"
                   className="w-full object-contain max-h-[560px]"
                 />

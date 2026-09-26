@@ -18,7 +18,7 @@ interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string | null;
-  image_urls: string[];
+  image_keys: string[];
   created_at: string;
 }
 
@@ -117,7 +117,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
   // batch the currently-open image came from. Image URLs are the identity
   // now (there's no more per-design row/id).
   function allImageUrls(): string[] {
-    return messages.flatMap((m) => m.image_urls);
+    return messages.flatMap((m) => m.image_keys);
   }
 
   // Stops at the ends — no wraparound from last back to first.
@@ -151,19 +151,19 @@ function ChatInner({ sessionId }: { sessionId: string }) {
     async function load() {
       const { data: session } = await supabase
         .from("sessions")
-        .select("flow_type, rework_mode, style, selected_design_url")
+        .select("flow_type, rework_mode, style, selected_design_key")
         .eq("id", sessionId)
         .maybeSingle();
       if (!cancelled && session) {
         setSessionFlowType((session.flow_type as "ai_design" | "rework" | null) ?? flowType);
         setSessionReworkMode((session.rework_mode as "cover" | "extend" | null) ?? reworkMode);
         setSessionStyle(session.style ?? tattooStyle);
-        setFinalizedUrl(session.selected_design_url ?? null);
+        setFinalizedUrl(session.selected_design_key ?? null);
       }
 
       const { data: chatRows } = await supabase
         .from("chat_messages")
-        .select("id, role, content, image_urls, created_at")
+        .select("id, role, content, image_keys, created_at")
         .eq("session_id", sessionId)
         .order("created_at", { ascending: true });
 
@@ -202,7 +202,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
         }
         const lastMessage = loadedMessages[loadedMessages.length - 1];
         if (!cancelled && status.found && !status.done && lastMessage?.role === "assistant" && status.slots) {
-          const alreadyDone = lastMessage.image_urls.length;
+          const alreadyDone = lastMessage.image_keys.length;
           processedSlotsRef.current = new Set(Array.from({ length: alreadyDone }, (_, i) => i));
           setPendingSlots((prev) => ({
             ...prev,
@@ -247,7 +247,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
   // a slot stuck on "loading" with nothing shown for it. ─────────
   async function watchJob(assistantMessageId: string) {
     const prefix = sessionFlowType === "rework" ? "rework" : "designs";
-    const imageUrls: string[] = messages.find((m) => m.id === assistantMessageId)?.image_urls.slice() ?? [];
+    const imageUrls: string[] = messages.find((m) => m.id === assistantMessageId)?.image_keys.slice() ?? [];
 
     let notFoundStreak = 0;
     let networkErrorStreak = 0;
@@ -304,8 +304,8 @@ function ChatInner({ sessionId }: { sessionId: string }) {
           const imageUrl = await uploadBase64Direct(slot.imageBase64, sessionId, prefix);
           imageUrls.push(imageUrl);
 
-          await supabase.from("chat_messages").update({ image_urls: imageUrls }).eq("id", assistantMessageId);
-          setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? { ...m, image_urls: [...imageUrls] } : m)));
+          await supabase.from("chat_messages").update({ image_keys: imageUrls }).eq("id", assistantMessageId);
+          setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? { ...m, image_keys: [...imageUrls] } : m)));
           setSlot(assistantMessageId, i, { status: "done" });
         } catch (err) {
           setSlot(assistantMessageId, i, { status: "error", reason: `Failed to save: ${(err as Error).message}` });
@@ -344,14 +344,14 @@ function ChatInner({ sessionId }: { sessionId: string }) {
 
       const { data: userMsg, error: userMsgErr } = await supabase
         .from("chat_messages")
-        .insert({ session_id: sessionId, role: "user", content: instructionForTurn, image_urls: referenceUrls, organization_id: organizationId })
+        .insert({ session_id: sessionId, role: "user", content: instructionForTurn, image_keys: referenceUrls, organization_id: organizationId })
         .select()
         .single();
       if (userMsgErr) throw new Error(`Couldn't save your message: ${userMsgErr.message}`);
 
       const { data: assistantMsg, error: assistantMsgErr } = await supabase
         .from("chat_messages")
-        .insert({ session_id: sessionId, role: "assistant", content: null, image_urls: [], organization_id: organizationId })
+        .insert({ session_id: sessionId, role: "assistant", content: null, image_keys: [], organization_id: organizationId })
         .select()
         .single();
       if (assistantMsgErr) throw new Error(`Couldn't start the reply: ${assistantMsgErr.message}`);
@@ -545,6 +545,16 @@ function ChatInner({ sessionId }: { sessionId: string }) {
   const viewingSiblings = viewingUrl ? allImageUrls() : [];
   const viewingSiblingIndex = viewingUrl ? viewingSiblings.indexOf(viewingUrl) : -1;
 
+  // Sequential number across the whole thread, oldest generated first --
+  // reference photos (user turns) don't count, only generated results do.
+  const imageNumberByKey = new Map<string, number>();
+  messages.forEach((m) => {
+    if (m.role !== "assistant") return;
+    m.image_keys.forEach((key) => {
+      if (!imageNumberByKey.has(key)) imageNumberByKey.set(key, imageNumberByKey.size + 1);
+    });
+  });
+
   return (
     <div className="relative flex flex-col h-[calc(100vh-57px)]">
       {/* Finalize confirmation — non-blocking, stays in chat so the studio
@@ -581,9 +591,9 @@ function ChatInner({ sessionId }: { sessionId: string }) {
           msg.role === "user" ? (
             <div key={msg.id} className="flex justify-end">
               <div className="max-w-[85%] sm:max-w-md bg-gold/10 border border-gold/30 rounded-2xl rounded-tr-sm px-4 py-2.5 flex flex-col gap-2">
-                {msg.image_urls.length > 0 && (
+                {msg.image_keys.length > 0 && (
                   <div className="flex gap-1.5 flex-wrap justify-end">
-                    {msg.image_urls.map((url, i) => (
+                    {msg.image_keys.map((url, i) => (
                       <div
                         key={i}
                         onClick={() => setViewingRawUrl(url)}
@@ -600,7 +610,7 @@ function ChatInner({ sessionId }: { sessionId: string }) {
             </div>
           ) : (
             <div key={msg.id} className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5 sm:gap-3 max-w-3xl">
-              {msg.image_urls.map((url, i) => {
+              {msg.image_keys.map((url, i) => {
                 const isSelected = selectedIds.has(url);
                 const isFinalized = finalizedUrl === url;
                 return (
@@ -612,6 +622,10 @@ function ChatInner({ sessionId }: { sessionId: string }) {
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={resolveImageSrc(url)} alt="Design" className="w-full h-full object-cover" />
+
+                    <span className="absolute top-1.5 right-1.5 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-black/60 text-white text-[10px] font-mono font-bold flex items-center justify-center leading-none">
+                      {imageNumberByKey.get(url)}
+                    </span>
 
                     <button
                       onClick={(e) => { e.stopPropagation(); toggleSelect(url); }}
@@ -790,6 +804,12 @@ function ChatInner({ sessionId }: { sessionId: string }) {
           >
             ×
           </button>
+
+          {imageNumberByKey.has(viewingUrl) && (
+            <span className="absolute top-4 left-4 bg-white/10 text-white text-xs font-mono tracking-wider px-3 py-2 rounded-full">
+              Design #{imageNumberByKey.get(viewingUrl)}
+            </span>
+          )}
 
           {viewingSiblingIndex > 0 && (
             <button

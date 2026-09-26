@@ -74,7 +74,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Cannot deactivate your own account" }, { status: 400 });
   }
 
-  const updates: { is_active?: boolean; name?: string; email?: string; avatar_url?: string } = {};
+  const updates: { is_active?: boolean; name?: string; email?: string; avatar_key?: string } = {};
   if (typeof is_active === "boolean") updates.is_active = is_active;
   if (typeof name === "string" && name.trim()) updates.name = name.trim();
 
@@ -87,7 +87,7 @@ export async function PATCH(req: NextRequest) {
 
   if (typeof avatarBase64 === "string" && avatarBase64) {
     try {
-      updates.avatar_url = await uploadBase64(avatarBase64, id, "avatars");
+      updates.avatar_key = await uploadBase64(avatarBase64, id, "avatars");
     } catch (err) {
       return NextResponse.json({ error: (err as Error).message }, { status: 500 });
     }
@@ -101,7 +101,7 @@ export async function PATCH(req: NextRequest) {
     .from("staff")
     .update(updates)
     .eq("id", id)
-    .select("id, email, name, role, is_active, created_at, avatar_url")
+    .select("id, email, name, role, is_active, created_at, avatar_key")
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

@@ -8,7 +8,7 @@ export interface StaffMember {
   role: StaffRole;
   is_active: boolean;
   created_at: string;
-  avatar_url?: string | null;
+  avatar_key?: string | null;
   trash_last_viewed_at?: string | null;
   organization_id: string;
 }

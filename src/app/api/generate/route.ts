@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { buildTattooPrompt, createKeiTask, waitForKeiTask, KeiTaskFailedError, KeiCreditsError } from "@/lib/kei-api";
 import type { RefinementInfo } from "@/lib/kei-api";
 import { uploadBase64 } from "@/lib/storage";
+import { toPublicUrl } from "@/lib/image-src";
 import { startJob, setSlot } from "@/lib/generation-jobs";
 import { requireFeature } from "@/lib/permissions/require-feature";
 
@@ -113,11 +114,15 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "At least one reference image is required" }, { status: 400 });
   }
 
+  // referenceImageUrls/refineImageUrls arrive from the client as whatever
+  // was stored at rest — our own bare storage keys or a genuine external
+  // (Pinterest) URL — but KEI fetches these itself, so it needs real,
+  // fetchable URLs regardless.
   let inputUrls: string[];
   if (isRefinement) {
-    inputUrls = [...(refineImageUrls as string[]), ...allRefs];
+    inputUrls = [...(refineImageUrls as string[]), ...allRefs].map(toPublicUrl);
   } else {
-    inputUrls = allRefs;
+    inputUrls = allRefs.map(toPublicUrl);
   }
 
   // ── Build prompt ─────────────────────────────────────────────────────

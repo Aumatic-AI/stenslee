@@ -9,6 +9,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 import { useAppStore } from "@/store/app-store";
 import { resolveBackUrl } from "@/lib/auth-utils";
 import FilterChips from "@/components/ui/FilterChips";
+import { resolveImageSrc } from "@/lib/image-src";
 
 const supabase = createSupabaseBrowserClient();
 
@@ -30,7 +31,7 @@ function TattooThumb({ url, alt }: { url: string; alt: string }) {
   }
   return (
     <Image
-      src={url}
+      src={resolveImageSrc(url)}
       alt={alt}
       fill
       unoptimized
@@ -53,10 +54,10 @@ interface CompletedSession {
   description: string | null;
   flow_type: "ai_design" | "rework";
   completed_at: string;
-  selectedDesignUrl: string | null;
+  selectedDesignKey: string | null;
   selectedDesignStyle: string | null;
   placementText: string | null;
-  placementCompositeUrl: string | null;
+  placementCompositeKey: string | null;
   // Rework only — the original photo of the existing tattoo, from the first
   // chat turn (there's no dedicated column for it, see SessionOverview).
   sourcePhoto: string | null;
@@ -171,17 +172,17 @@ function CustomerDashboardInner() {
           .from("sessions")
           .select(`
             id, style, description, flow_type, completed_at,
-            selected_design_url, selected_design_style,
-            placement_text, placement_composite_url
+            selected_design_key, selected_design_style,
+            placement_text, placement_composite_key
           `)
           .eq("customer_id", userId)
           .eq("status", "completed")
-          .not("selected_design_url", "is", null)
+          .not("selected_design_key", "is", null)
           .is("deleted_at", null)
           .order("completed_at", { ascending: false }),
         supabase
           .from("sessions")
-          .select("id, style, description, created_at, selected_design_url")
+          .select("id, style, description, created_at, selected_design_key")
           .eq("customer_id", userId)
           .eq("status", "active")
           .is("deleted_at", null)
@@ -200,10 +201,10 @@ function CustomerDashboardInner() {
           description: s.description,
           flow_type: s.flow_type ?? "ai_design",
           completed_at: s.completed_at,
-          selectedDesignUrl: s.selected_design_url,
+          selectedDesignKey: s.selected_design_key,
           selectedDesignStyle: s.selected_design_style,
           placementText: s.placement_text,
-          placementCompositeUrl: s.placement_composite_url,
+          placementCompositeKey: s.placement_composite_key,
           sourcePhoto: null,
         }));
 
@@ -214,15 +215,15 @@ function CustomerDashboardInner() {
         if (reworkIds.length > 0) {
           const { data: firstTurns } = await supabase
             .from("chat_messages")
-            .select("session_id, image_urls, created_at")
+            .select("session_id, image_keys, created_at")
             .in("session_id", reworkIds)
             .eq("role", "user")
             .order("created_at", { ascending: true });
 
           const sourcePhotoBySession = new Map<string, string>();
           for (const row of firstTurns ?? []) {
-            if (!sourcePhotoBySession.has(row.session_id) && row.image_urls?.[0]) {
-              sourcePhotoBySession.set(row.session_id, row.image_urls[0]);
+            if (!sourcePhotoBySession.has(row.session_id) && row.image_keys?.[0]) {
+              sourcePhotoBySession.set(row.session_id, row.image_keys[0]);
             }
           }
           for (const s of mapped) {
@@ -241,7 +242,7 @@ function CustomerDashboardInner() {
           style: s.style,
           description: s.description,
           created_at: s.created_at,
-          hasDesign: !!s.selected_design_url,
+          hasDesign: !!s.selected_design_key,
         }));
         setActiveSessions(mappedActive);
       }
@@ -533,8 +534,8 @@ function CustomerDashboardInner() {
             <div className="flex flex-col gap-4">
               {filteredSessions.map((session, i) => {
                 const isRework = session.flow_type === "rework";
-                const designUrl = session.selectedDesignUrl ?? undefined;
-                const bodyUrl = session.placementCompositeUrl ?? undefined;
+                const designUrl = session.selectedDesignKey ?? undefined;
+                const bodyUrl = session.placementCompositeKey ?? undefined;
                 const dateLabel = new Date(session.completed_at).toLocaleDateString("en-US", {
                   year: "numeric", month: "short", day: "numeric",
                 });

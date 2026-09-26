@@ -5,11 +5,12 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import Image from "next/image";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
+import { getStorageUrl } from "@/lib/image-src";
 
 interface AdminProfile {
   id: string;
   name: string;
-  avatar_url: string | null;
+  avatar_key: string | null;
 }
 
 export default function AdminSettingsPage() {
@@ -34,12 +35,12 @@ export default function AdminSettingsPage() {
       if (!user) { router.push("/studio/login"); return; }
 
       const { data: staffRow } = await supabase
-        .from("staff").select("id, name, role, avatar_url").eq("id", user.id).maybeSingle();
+        .from("staff").select("id, name, role, avatar_key").eq("id", user.id).maybeSingle();
       if (staffRow?.role !== "admin") { router.push("/studio/designer"); return; }
 
       setStaff(staffRow);
       setName(staffRow.name);
-      setAvatarPreview(staffRow.avatar_url ?? null);
+      setAvatarPreview(getStorageUrl(staffRow.avatar_key));
     }
     init();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -55,7 +56,7 @@ export default function AdminSettingsPage() {
     // Reset any unsaved edits back to the current saved values.
     if (staff) {
       setName(staff.name);
-      setAvatarPreview(staff.avatar_url ?? null);
+      setAvatarPreview(getStorageUrl(staff.avatar_key));
     }
     setAvatarBase64(null);
     setProfileError("");
@@ -101,7 +102,7 @@ export default function AdminSettingsPage() {
       }
       const { staff: updated } = await res.json() as { staff: AdminProfile };
       setStaff(updated);
-      setAvatarPreview(updated.avatar_url ?? null);
+      setAvatarPreview(getStorageUrl(updated.avatar_key));
     } else {
       // A plain name change — RLS already grants admins direct write
       // access to their own staff row, so this skips the API route.
@@ -109,7 +110,7 @@ export default function AdminSettingsPage() {
         .from("staff")
         .update({ name: trimmed })
         .eq("id", staff.id)
-        .select("id, name, avatar_url")
+        .select("id, name, avatar_key")
         .single();
 
       if (error) {
@@ -185,8 +186,8 @@ export default function AdminSettingsPage() {
         {!profileOpen ? (
           <div className="flex items-center gap-4">
             <div className="relative w-14 h-14 rounded-full bg-gold/10 border border-gold/30 flex items-center justify-center overflow-hidden flex-shrink-0">
-              {staff?.avatar_url ? (
-                <Image src={staff.avatar_url} alt={staff.name} fill unoptimized className="object-cover" />
+              {staff?.avatar_key ? (
+                <Image src={getStorageUrl(staff.avatar_key)!} alt={staff.name} fill unoptimized className="object-cover" />
               ) : (
                 <span className="font-cinzel text-xl font-black text-gold">{name.charAt(0).toUpperCase() || "?"}</span>
               )}

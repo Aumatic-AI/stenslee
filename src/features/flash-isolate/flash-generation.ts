@@ -87,7 +87,7 @@ export async function watchFlashGeneration(
 
     try {
       const url = await uploadBase64Direct(slot.imageBase64, sessionId, "flash");
-      await supabase.from("sessions").update({ flash_image_url: url }).eq("id", sessionId);
+      await supabase.from("sessions").update({ flash_image_key: url }).eq("id", sessionId);
       onTick?.("done");
       return url;
     } catch (err) {

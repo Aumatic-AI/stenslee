@@ -8,11 +8,12 @@ import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 import FilterChips from "@/components/ui/FilterChips";
 import type { StaffMember } from "@/lib/staff-types";
+import { getStorageUrl } from "@/lib/image-src";
 
 type DesignerRow = StaffMember & { session_count: number };
 
 const PAGE_SIZE = 10;
-const DESIGNER_SELECT = "id, email, name, role, is_active, created_at, avatar_url";
+const DESIGNER_SELECT = "id, email, name, role, is_active, created_at, avatar_key";
 
 type ActiveFilter = "all" | "active" | "inactive";
 
@@ -177,7 +178,7 @@ function DesignersPageInner() {
     setEditName(d.name);
     setEditEmail(d.email);
     setEditActive(d.is_active);
-    setEditAvatarPreview(d.avatar_url ?? null);
+    setEditAvatarPreview(getStorageUrl(d.avatar_key));
     setEditAvatarBase64(null);
     setEditError("");
   }
@@ -255,7 +256,7 @@ function DesignersPageInner() {
         .from("staff")
         .update(updates)
         .eq("id", editingDesigner.id)
-        .select("id, email, name, role, is_active, created_at, avatar_url")
+        .select("id, email, name, role, is_active, created_at, avatar_key")
         .single();
 
       if (error) {
@@ -387,8 +388,8 @@ function DesignersPageInner() {
               >
                 <Link href={`/studio/admin/designers/${d.id}`} className="flex items-center gap-3 flex-1 min-w-0 group">
                   <div className="relative w-9 h-9 rounded-full bg-gold/10 border border-gold/20 flex items-center justify-center flex-shrink-0 overflow-hidden group-hover:border-gold/50 transition-colors">
-                    {d.avatar_url ? (
-                      <Image src={d.avatar_url} alt={d.name} fill unoptimized className="object-cover" />
+                    {d.avatar_key ? (
+                      <Image src={getStorageUrl(d.avatar_key)!} alt={d.name} fill unoptimized className="object-cover" />
                     ) : (
                       <span className="font-cinzel text-sm font-black text-gold">{d.name.charAt(0).toUpperCase()}</span>
                     )}

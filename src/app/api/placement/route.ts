@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { createKeiTask, waitForKeiTask, KeiTaskFailedError, KeiCreditsError } from "@/lib/kei-api";
+import { toPublicUrl } from "@/lib/image-src";
 // TEST: minimal-prompt version, in use in place of the full-length prompts
 // in @/features/ai-design/prompts. Revert this import to go back to those.
 import {
@@ -106,6 +107,11 @@ export async function POST(req: NextRequest) {
     if (bodyPhotoUrl) inputUrls.push(bodyPhotoUrl as string);
     prompt = buildPlacementPrompt(placementText ?? "", !!bodyPhotoUrl);
   }
+
+  // tattooImageUrl/bodyPhotoUrl/compositeUrl may be our own bare storage
+  // keys or an already-hosted external URL — KEI fetches these itself, so
+  // it needs real, fetchable URLs regardless.
+  inputUrls = inputUrls.map(toPublicUrl);
 
   // ── Start the job and return immediately ─────────────────────────────
   // The client polls /api/generation-status instead of holding this

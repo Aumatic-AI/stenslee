@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { createKeiTask, waitForKeiTask, KeiTaskFailedError, KeiCreditsError } from "@/lib/kei-api";
+import { toPublicUrl } from "@/lib/image-src";
 import { startJob, setSlot } from "@/lib/generation-jobs";
 import { requireFeature } from "@/lib/permissions/require-feature";
 
@@ -42,7 +43,7 @@ export async function POST(req: NextRequest) {
 
   void (async () => {
     try {
-      const taskId = await createKeiTask(FLASH_PROMPT, [imageUrl], { model: "gpt-image-2-image-to-image" });
+      const taskId = await createKeiTask(FLASH_PROMPT, [toPublicUrl(imageUrl)], { model: "gpt-image-2-image-to-image" });
       const url = await waitForKeiTask(taskId);
       const imageBase64 = await fetchAsBase64(url);
       setSlot(jobKey, 0, { status: "done", imageBase64 });

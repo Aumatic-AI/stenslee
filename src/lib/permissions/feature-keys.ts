@@ -21,6 +21,8 @@ export const FEATURE_KEYS = [
   "admin_dashboard",
   "trash_retention",
   "storage_quota",
+  "design_library",
+  "library_file_size_limit",
   "catalog",
   "whatsapp",
 ] as const;
@@ -42,6 +44,7 @@ export const LIMITED_FEATURE_KEYS: readonly FeatureKey[] = [
   "admin_seats",
   "trash_retention",
   "storage_quota",
+  "library_file_size_limit",
 ];
 
 export function isFeatureKey(value: string): value is FeatureKey {

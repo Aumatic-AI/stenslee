@@ -70,7 +70,7 @@ export default function TattooPlacementEditor({ bodyPhotoUrl, tattooImageUrl, on
     img.onload = () => {
       setTattooAspect(img.naturalWidth > 0 ? img.naturalWidth / img.naturalHeight : 1);
     };
-    img.src = tattooImageUrl;
+    img.src = resolveImageSrc(tattooImageUrl);
   }, [tattooImageUrl]);
 
   // Once the container has been sized by the body photo's aspect, drop the
@@ -266,7 +266,7 @@ export default function TattooPlacementEditor({ bodyPhotoUrl, tattooImageUrl, on
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={tattooImageUrl}
+              src={resolveImageSrc(tattooImageUrl)}
               alt="Tattoo"
               className="w-full h-full object-contain pointer-events-none"
               style={{ opacity: 0.88 }}

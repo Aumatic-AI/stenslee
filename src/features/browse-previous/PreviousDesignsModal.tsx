@@ -205,7 +205,7 @@ export default function PreviousDesignsModal({ onSelect, onClose }: Props) {
   }, [sessions, customerFilter, designerFilter, role]);
 
   // ── Fetch one page of previously-finished designs for the current filter
-  // scope. A "design" is now just a session with a selected_design_url set
+  // scope. A "design" is now just a session with a selected_design_key set
   // — there's no more separate per-design table (see spec: a session only
   // ever has one finalized design). ──
   const loadPage = useCallback(async (offset: number, replace: boolean) => {
@@ -217,9 +217,9 @@ export default function PreviousDesignsModal({ onSelect, onClose }: Props) {
     setLoadingPage(true);
     const { data: designRows, error: designsError } = await supabase
       .from("sessions")
-      .select("id, selected_design_url, selected_design_style, created_at")
+      .select("id, selected_design_key, selected_design_style, created_at")
       .in("id", scopedSessionIds)
-      .not("selected_design_url", "is", null)
+      .not("selected_design_key", "is", null)
       .order("created_at", { ascending: false })
       .range(offset, offset + PAGE_SIZE - 1);
 
@@ -233,7 +233,7 @@ export default function PreviousDesignsModal({ onSelect, onClose }: Props) {
       const session = sessionById.get(d.id);
       return {
         id: d.id,
-        imageUrl: d.selected_design_url!,
+        imageUrl: d.selected_design_key!,
         styleName: d.selected_design_style,
         customerName: session?.customerName ?? "Unknown",
         designerName: session?.designerName ?? "Unassigned",

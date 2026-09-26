@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { createKeiTask, waitForKeiTask, KeiTaskFailedError, KeiCreditsError } from "@/lib/kei-api";
 import { buildReworkPrompt } from "@/features/rework/prompts";
 import { uploadBase64 } from "@/lib/storage";
+import { toPublicUrl } from "@/lib/image-src";
 import { startJob, setSlot } from "@/lib/generation-jobs";
 import { requireFeature } from "@/lib/permissions/require-feature";
 
@@ -89,7 +90,10 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "A photo of the existing tattoo is required" }, { status: 400 });
   }
 
-  const inputUrls = isEdit ? editSourceUrls : [sourceUrl];
+  // editSourceUrls/sourceUrl may be our own bare storage keys or an already-
+  // hosted external URL — KEI fetches these itself, so it needs real,
+  // fetchable URLs regardless.
+  const inputUrls = (isEdit ? editSourceUrls : [sourceUrl]).map(toPublicUrl);
 
   const prompt = buildReworkPrompt({
     description,

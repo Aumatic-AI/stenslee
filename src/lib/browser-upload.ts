@@ -1,6 +1,7 @@
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 
 const supabase = createSupabaseBrowserClient();
+const BUCKET = "session-assets";
 
 function extFromMime(mime: string): string {
   if (mime.includes("png")) return "png";
@@ -12,8 +13,10 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Uploads a Blob straight from the browser to Supabase Storage and returns
-// its public URL. Used instead of sending the file to a Node API route to
+// Uploads a Blob straight from the browser to Supabase Storage and returns a
+// bare storage key ("<bucket>/<path>"), not a full URL — resolve it with
+// resolveImageSrc()/toPublicUrl() wherever it's displayed or sent to an
+// external API. Used instead of sending the file to a Node API route to
 // upload — this machine's Node process is unreliable talking to Supabase
 // over the network, while the browser's own network stack isn't.
 //
@@ -29,8 +32,8 @@ export async function uploadBlobDirect(blob: Blob, sessionId: string, prefix: st
 
   let lastError: string | undefined;
   for (let attempt = 1; attempt <= MAX_UPLOAD_ATTEMPTS; attempt++) {
-    const { error } = await supabase.storage.from("session-assets").upload(path, blob, { contentType, upsert: false });
-    if (!error) return supabase.storage.from("session-assets").getPublicUrl(path).data.publicUrl;
+    const { error } = await supabase.storage.from(BUCKET).upload(path, blob, { contentType, upsert: false });
+    if (!error) return `${BUCKET}/${path}`;
 
     lastError = error.message;
     if (attempt < MAX_UPLOAD_ATTEMPTS) {
