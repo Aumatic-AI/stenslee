@@ -28,22 +28,41 @@ export default function WhatsAppPage() {
   const whatsappFeature = useFeature("whatsapp");
 
   const [connection, setConnection] = useState<ConnectionState | null>(null);
+  const [loadError, setLoadError] = useState("");
   const [tab, setTab] = useState<Tab>("templates");
   const [disconnecting, setDisconnecting] = useState(false);
 
+  // Loads connection status; always ends in connection or loadError, never stuck loading.
   async function loadConnection() {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data: staff } = await supabase.from("staff").select("organization_id").eq("id", user.id).maybeSingle();
-    if (!staff?.organization_id) return;
+    setLoadError("");
+    try {
+      // Refreshes the session before any server-route fetches fire.
+      await supabase.auth.getSession();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setLoadError("You're not signed in — please log in again.");
+        return;
+      }
 
-    const { data: org } = await supabase
-      .from("organizations")
-      .select("whatsapp_waba_id, whatsapp_display_phone_number")
-      .eq("id", staff.organization_id)
-      .maybeSingle();
+      const { data: staff, error: staffError } = await supabase
+        .from("staff").select("organization_id").eq("id", user.id).maybeSingle();
+      if (staffError) { setLoadError(`Couldn't load your staff record: ${staffError.message}`); return; }
+      if (!staff?.organization_id) {
+        setLoadError("Your account isn't linked to an organization — please reload or contact an admin.");
+        return;
+      }
 
-    setConnection({ connected: !!org?.whatsapp_waba_id, displayPhoneNumber: org?.whatsapp_display_phone_number ?? null });
+      const { data: org, error: orgError } = await supabase
+        .from("organizations")
+        .select("whatsapp_waba_id, whatsapp_display_phone_number")
+        .eq("id", staff.organization_id)
+        .maybeSingle();
+      if (orgError) { setLoadError(`Couldn't load connection status: ${orgError.message}`); return; }
+
+      setConnection({ connected: !!org?.whatsapp_waba_id, displayPhoneNumber: org?.whatsapp_display_phone_number ?? null });
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Something went wrong loading this page.");
+    }
   }
 
   useEffect(() => {
@@ -79,7 +98,17 @@ export default function WhatsAppPage() {
         </div>
       </div>
 
-      {connection === null ? (
+      {loadError ? (
+        <div className="bg-surface border border-error/30 rounded-2xl p-8 flex flex-col items-center gap-3 text-center">
+          <p className="text-error text-sm">{loadError}</p>
+          <button
+            onClick={() => loadConnection()}
+            className="text-gold text-xs font-mono uppercase tracking-widest underline cursor-pointer"
+          >
+            Try again
+          </button>
+        </div>
+      ) : connection === null ? (
         <div className="skeleton h-40 rounded-2xl" />
       ) : !connection.connected ? (
         <div className="bg-surface border border-cleo-border rounded-2xl p-10 flex flex-col items-center gap-4 text-center">
