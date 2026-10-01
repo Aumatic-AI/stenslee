@@ -5,6 +5,7 @@ import { uploadBase64 } from "@/lib/storage";
 import { toPublicUrl } from "@/lib/image-src";
 import { startJob, setSlot } from "@/lib/generation-jobs";
 import { requireFeature } from "@/lib/permissions/require-feature";
+import { reserveCredits, refundCredits } from "@/lib/credits";
 
 // Fetching from KEI works reliably from this server (unlike uploading TO
 // Supabase, which doesn't) — so download the result here but hand the bytes
@@ -102,7 +103,19 @@ export async function POST(req: NextRequest) {
     imageCount: inputUrls.length,
   });
 
-  const clampedCount = Math.min(5, Math.max(1, Number(count) || 5));
+  // ── Credits — reserve before starting, refund per image that fails ───
+  const requestedCount = Math.min(5, Math.max(1, Number(count) || 5));
+  const organizationId = reworkCheck.result.organizationId as string;
+  const clampedCount = await reserveCredits(organizationId, requestedCount);
+  if (clampedCount === 0) {
+    return Response.json({ error: "Out of AI credits", code: "insufficient_credits" }, { status: 403 });
+  }
+
+  function failSlot(index: number, reason: string, code?: string) {
+    void refundCredits(organizationId, 1);
+    setSlot(sessionId, index, { status: "error", reason, code });
+  }
+
   startJob(sessionId, iteration, clampedCount, isEdit ? parentDesignIds : [], isEdit ? editInstruction : null);
 
   // Fire and forget — the job runs independent of this request/response, so
@@ -116,7 +129,7 @@ export async function POST(req: NextRequest) {
           .then(async (result) => {
             if (!result.ok) {
               console.warn(`[generate-rework] task ${index} failed: ${result.reason}`);
-              setSlot(sessionId, index, { status: "error", reason: result.reason, code: result.credits ? "insufficient_credits" : undefined });
+              failSlot(index, result.reason, result.credits ? "insufficient_credits" : undefined);
               return;
             }
             try {
@@ -124,10 +137,10 @@ export async function POST(req: NextRequest) {
               setSlot(sessionId, index, { status: "done", imageBase64 });
             } catch (err) {
               console.error(`[generate-rework] fetching result failed for task ${index}:`, err);
-              setSlot(sessionId, index, { status: "error", reason: `Image fetch failed: ${(err as Error).message}` });
+              failSlot(index, `Image fetch failed: ${(err as Error).message}`);
             }
           })
-          .catch((err) => setSlot(sessionId, index, { status: "error", reason: (err as Error).message }))
+          .catch((err) => failSlot(index, (err as Error).message))
       )
     );
   })();

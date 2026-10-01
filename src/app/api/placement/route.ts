@@ -11,6 +11,7 @@ import {
 } from "@/features/placement/prompts";
 import { startJob, setSlot } from "@/lib/generation-jobs";
 import { requireFeature } from "@/lib/permissions/require-feature";
+import { reserveCredits, refundCredits } from "@/lib/credits";
 
 export const maxDuration = 300;
 
@@ -89,6 +90,13 @@ export async function POST(req: NextRequest) {
   const check = await requireFeature("placement");
   if (!check.ok) return check.response;
 
+  // ── Credits — reserve before starting, refund if it fails ────────────
+  const organizationId = check.result.organizationId as string;
+  const reserved = await reserveCredits(organizationId, 1);
+  if (reserved === 0) {
+    return Response.json({ error: "Out of AI credits", code: "insufficient_credits" }, { status: 403 });
+  }
+
   let prompt: string;
   let inputUrls: string[];
 
@@ -124,6 +132,7 @@ export async function POST(req: NextRequest) {
     const result = await runKeiWithRetry(prompt, inputUrls);
     if (!result.ok) {
       console.warn(`[placement] generation failed: ${result.reason}`);
+      void refundCredits(organizationId, 1);
       setSlot(jobKey, 0, {
         status: "error",
         reason: result.reason,
@@ -136,6 +145,7 @@ export async function POST(req: NextRequest) {
       setSlot(jobKey, 0, { status: "done", imageBase64 });
     } catch (err) {
       console.error("[placement] fetching result failed:", err);
+      void refundCredits(organizationId, 1);
       setSlot(jobKey, 0, { status: "error", reason: `Fetching result failed: ${(err as Error).message}` });
     }
   })();

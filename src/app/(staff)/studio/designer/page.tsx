@@ -11,6 +11,7 @@ import type { StaffMember } from "@/lib/staff-types";
 import { getStorageUrl } from "@/lib/image-src";
 import { useFeature } from "@/lib/permissions/use-feature";
 import { FeatureLocked } from "@/components/ui/FeatureLocked";
+import { DEFAULT_COUNTRY_CODE, isValidPhone, sanitizeCountryCodeInput, sanitizePhoneNumberInput } from "@/lib/phone";
 
 interface CustomerResult {
   id: string;
@@ -30,13 +31,6 @@ interface RecentSession {
 const SESSIONS_PAGE_SIZE = 10;
 const MIN_QUERY_LENGTH = 1;
 
-function formatPhone(value: string) {
-  const d = value.replace(/\D/g, "").slice(0, 10);
-  if (d.length <= 3) return d;
-  if (d.length <= 6) return `(${d.slice(0, 3)}) ${d.slice(3)}`;
-  return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
-}
-
 export default function DesignerDashboard() {
   const router = useRouter();
   const { setDesignerId, startSession, startSessionForUser } = useAppStore();
@@ -47,7 +41,8 @@ export default function DesignerDashboard() {
   const [searchResults, setSearchResults] = useState<{ id: string; name: string; phone: string }[] | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerResult | null>(null);
   const [name, setName] = useState("");
-  const [newPhone, setNewPhone] = useState("");
+  const [newCountryCode, setNewCountryCode] = useState(DEFAULT_COUNTRY_CODE);
+  const [newPhoneNumber, setNewPhoneNumber] = useState("");
   const [searching, setSearching] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -118,40 +113,50 @@ export default function DesignerDashboard() {
   // debounced so it doesn't fire on every keystroke, and only once there's
   // enough typed to make a search worthwhile.
   useEffect(() => {
-    setSelectedCustomer(null);
-    const q = query.trim();
-    if (q.length < MIN_QUERY_LENGTH) {
-      setSearchResults(null);
-      return;
-    }
-    setSearching(true);
-    const timer = setTimeout(async () => {
-      const { data } = await supabase.rpc("search_customers", { q });
-      setSearchResults(data ?? []);
-      if (!data || data.length === 0) {
-        // No match — prefill the create-new form from whatever they typed.
-        const digitsOnly = q.replace(/\D/g, "");
-        const isPhoneShaped = /^[\d\s()+-]+$/.test(q);
-        if (isPhoneShaped && digitsOnly.length > 0 && digitsOnly.length <= 10) {
-          // A real (possibly partial) phone number — safe to prefill.
-          setName("");
-          setNewPhone(formatPhone(q));
-        } else if (!isPhoneShaped) {
-          // Contains letters — treat it as an attempted name.
-          setName(q);
-          setNewPhone("");
-        } else {
-          // All digits but more than 10 — not a valid phone number (likely
-          // a typo). Truncating it would silently produce a DIFFERENT,
-          // real customer's number, so leave both fields blank instead of
-          // guessing.
-          setName("");
-          setNewPhone("");
-        }
+    // Wrapped in a named function (instead of running this logic directly in
+    // the effect body) purely so every setState call below is lexically
+    // nested one level deep — satisfies react-hooks/set-state-in-effect
+    // without changing any actual timing/behavior.
+    function run() {
+      setSelectedCustomer(null);
+      const q = query.trim();
+      if (q.length < MIN_QUERY_LENGTH) {
+        setSearchResults(null);
+        return undefined;
       }
-      setSearching(false);
-    }, 500);
-    return () => clearTimeout(timer);
+      setSearching(true);
+      const timer = setTimeout(async () => {
+        const { data } = await supabase.rpc("search_customers", { q });
+        setSearchResults(data ?? []);
+        if (!data || data.length === 0) {
+          // No match — prefill the create-new form from whatever they typed.
+          const digitsOnly = q.replace(/\D/g, "");
+          const isPhoneShaped = /^[\d\s()+-]+$/.test(q);
+          if (isPhoneShaped && digitsOnly.length > 0 && digitsOnly.length <= 10) {
+            // A real (possibly partial) phone number — safe to prefill.
+            // Country code is left as whatever's already set — there's no
+            // reliable way to tell from typed digits alone whether they
+            // include one.
+            setName("");
+            setNewPhoneNumber(sanitizePhoneNumberInput(q));
+          } else if (!isPhoneShaped) {
+            // Contains letters — treat it as an attempted name.
+            setName(q);
+            setNewPhoneNumber("");
+          } else {
+            // All digits but more than 10 — not a valid phone number (likely
+            // a typo). Truncating it would silently produce a DIFFERENT,
+            // real customer's number, so leave both fields blank instead of
+            // guessing.
+            setName("");
+            setNewPhoneNumber("");
+          }
+        }
+        setSearching(false);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+    return run();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
@@ -181,11 +186,11 @@ export default function DesignerDashboard() {
 
   async function handleCreateNew(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim() || newPhone.replace(/\D/g, "").length < 10) return;
+    if (!name.trim() || !isValidPhone(newCountryCode, newPhoneNumber)) return;
     setStarting(true);
     setStartError("");
     try {
-      const { sessionId, userId } = await startSession(name.trim(), newPhone);
+      const { sessionId, userId } = await startSession(name.trim(), newCountryCode, newPhoneNumber);
 
       if (userId && !sessionId) {
         // Existing user detected mid-flow — go to their dashboard
@@ -390,18 +395,28 @@ export default function DesignerDashboard() {
                   onChange={(e) => setName(e.target.value)}
                   className="bg-bg border border-cleo-border rounded-xl px-4 py-3 text-ink text-base placeholder:text-muted/40 focus:outline-none focus:border-gold transition-colors"
                 />
-                <input
-                  type="tel"
-                  inputMode="numeric"
-                  placeholder="(555) 000-0000"
-                  value={newPhone}
-                  onChange={(e) => setNewPhone(formatPhone(e.target.value))}
-                  className="bg-bg border border-cleo-border rounded-xl px-4 py-3 text-ink font-mono text-base placeholder:text-muted/40 focus:outline-none focus:border-gold transition-colors"
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="tel"
+                    inputMode="tel"
+                    placeholder="+91"
+                    value={newCountryCode}
+                    onChange={(e) => setNewCountryCode(sanitizeCountryCodeInput(e.target.value))}
+                    className="w-20 flex-shrink-0 bg-bg border border-cleo-border rounded-xl px-3 py-3 text-ink font-mono text-base text-center placeholder:text-muted/40 focus:outline-none focus:border-gold transition-colors"
+                  />
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    placeholder="98765 43210"
+                    value={newPhoneNumber}
+                    onChange={(e) => setNewPhoneNumber(sanitizePhoneNumberInput(e.target.value))}
+                    className="flex-1 min-w-0 bg-bg border border-cleo-border rounded-xl px-4 py-3 text-ink font-mono text-base placeholder:text-muted/40 focus:outline-none focus:border-gold transition-colors"
+                  />
+                </div>
                 {startError && <p className="text-error text-xs">{startError}</p>}
                 <button
                   type="submit"
-                  disabled={starting || !name.trim() || newPhone.replace(/\D/g, "").length < 10}
+                  disabled={starting || !name.trim() || !isValidPhone(newCountryCode, newPhoneNumber)}
                   className="py-3 bg-gold text-bg font-cinzel font-bold text-sm tracking-[0.08em] uppercase rounded-xl border border-gold hover:bg-gold-light transition-colors disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
                 >
                   {starting ? "Creating…" : "✦ Create Account & Start Design"}

@@ -3,6 +3,7 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import type { StateStorage } from "zustand/middleware";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 import { usePermissionStore } from "@/store/permission-store";
+import { combinePhone } from "@/lib/phone";
 
 // Throttled localStorage — batches rapid writes (e.g. during streaming generation)
 // into one write per 400ms instead of one per state update. Reads are always instant.
@@ -87,7 +88,7 @@ interface AppState {
 
   // Actions
   setDesignerId: (id: string | null) => void;
-  startSession: (name: string, phone: string) => Promise<{ sessionId: string; userId: string | null; isNew: boolean }>;
+  startSession: (name: string, countryCode: string, phoneNumber: string) => Promise<{ sessionId: string; userId: string | null; isNew: boolean }>;
   startSessionForUser: (userId: string, name: string, phone: string) => Promise<string>;
   setTattooStyle: (style: string) => void;
   setTattooDescription: (text: string) => void;
@@ -196,7 +197,9 @@ export const useAppStore = create<AppState>()(
 
   setDesignerId: (id) => set({ designerId: id }),
 
-  startSession: async (name, phone) => {
+  startSession: async (name, countryCode, phoneNumber) => {
+    const phone = combinePhone(countryCode, phoneNumber);
+
     // Check if customer already exists
     const { data: existing } = await supabase
       .from("customers")
@@ -224,7 +227,7 @@ export const useAppStore = create<AppState>()(
     const id = generateId();
     const { data: customer, error: customerError } = await supabase
       .from("customers")
-      .insert({ name, phone, organization_id: organizationId })
+      .insert({ name, phone_country_code: countryCode, phone_number: phoneNumber, organization_id: organizationId })
       .select("id")
       .single();
     if (customerError) throw new Error(`Couldn't create the customer: ${customerError.message}`);

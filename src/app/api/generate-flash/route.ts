@@ -3,6 +3,7 @@ import { createKeiTask, waitForKeiTask, KeiTaskFailedError, KeiCreditsError } fr
 import { toPublicUrl } from "@/lib/image-src";
 import { startJob, setSlot } from "@/lib/generation-jobs";
 import { requireFeature } from "@/lib/permissions/require-feature";
+import { reserveCredits, refundCredits } from "@/lib/credits";
 
 // Deliberately minimal, same lesson as prompts-rework.ts: a short, direct
 // instruction gets a cleaner isolate than a long list of constraints.
@@ -36,6 +37,13 @@ export async function POST(req: NextRequest) {
   const poolCheck = await requireFeature("ai_design");
   if (!poolCheck.ok) return poolCheck.response;
 
+  // ── Credits — reserve before starting, refund if it fails ────────────
+  const organizationId = flashCheck.result.organizationId as string;
+  const reserved = await reserveCredits(organizationId, 1);
+  if (reserved === 0) {
+    return Response.json({ error: "Out of AI credits", code: "insufficient_credits" }, { status: 403 });
+  }
+
   // Keyed separately from the chat's per-session job so finalizing a design
   // (which can happen mid-chat) never collides with an in-flight chat edit.
   const jobKey = `flash:${designId}`;
@@ -48,6 +56,7 @@ export async function POST(req: NextRequest) {
       const imageBase64 = await fetchAsBase64(url);
       setSlot(jobKey, 0, { status: "done", imageBase64 });
     } catch (err) {
+      void refundCredits(organizationId, 1);
       if (err instanceof KeiCreditsError) {
         setSlot(jobKey, 0, { status: "error", reason: err.message, code: "insufficient_credits" });
       } else if (err instanceof KeiTaskFailedError) {

@@ -10,15 +10,9 @@ import { useAppStore } from "@/store/app-store";
 import { resolveBackUrl } from "@/lib/auth-utils";
 import FilterChips from "@/components/ui/FilterChips";
 import { resolveImageSrc } from "@/lib/image-src";
+import { isValidPhone, sanitizeCountryCodeInput, sanitizePhoneNumberInput } from "@/lib/phone";
 
 const supabase = createSupabaseBrowserClient();
-
-function formatPhone(value: string) {
-  const d = value.replace(/\D/g, "").slice(0, 10);
-  if (d.length <= 3) return d;
-  if (d.length <= 6) return `(${d.slice(0, 3)}) ${d.slice(3)}`;
-  return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
-}
 
 function TattooThumb({ url, alt }: { url: string; alt: string }) {
   const [errored, setErrored] = useState(false);
@@ -45,6 +39,8 @@ function TattooThumb({ url, alt }: { url: string; alt: string }) {
 interface UserProfile {
   name: string;
   phone: string;
+  phone_country_code: string;
+  phone_number: string;
   created_at: string;
 }
 
@@ -139,7 +135,8 @@ function CustomerDashboardInner() {
 
   const [editingProfile, setEditingProfile] = useState(false);
   const [editName, setEditName] = useState("");
-  const [editPhone, setEditPhone] = useState("");
+  const [editCountryCode, setEditCountryCode] = useState("");
+  const [editPhoneNumber, setEditPhoneNumber] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
   const [saveError, setSaveError] = useState("");
 
@@ -165,7 +162,7 @@ function CustomerDashboardInner() {
       const [userRes, sessionsRes, activeRes] = await Promise.all([
         supabase
           .from("customers")
-          .select("name, phone, created_at")
+          .select("name, phone, phone_country_code, phone_number, created_at")
           .eq("id", userId)
           .maybeSingle(),
         supabase
@@ -269,7 +266,8 @@ function CustomerDashboardInner() {
   function openEditProfile() {
     if (!profile) return;
     setEditName(profile.name);
-    setEditPhone(profile.phone);
+    setEditCountryCode(profile.phone_country_code);
+    setEditPhoneNumber(profile.phone_number);
     setSaveError("");
     setEditingProfile(true);
   }
@@ -278,14 +276,13 @@ function CustomerDashboardInner() {
     e.preventDefault();
     if (!profile) return;
     const trimmedName = editName.trim();
-    const digits = editPhone.replace(/\D/g, "");
-    if (!trimmedName || digits.length < 10) return;
+    if (!trimmedName || !isValidPhone(editCountryCode, editPhoneNumber)) return;
 
     setSavingProfile(true);
     setSaveError("");
     const { error } = await supabase
       .from("customers")
-      .update({ name: trimmedName, phone: editPhone })
+      .update({ name: trimmedName, phone_country_code: editCountryCode, phone_number: editPhoneNumber })
       .eq("id", userId);
 
     if (error) {
@@ -299,7 +296,13 @@ function CustomerDashboardInner() {
       return;
     }
 
-    setProfile({ ...profile, name: trimmedName, phone: editPhone });
+    setProfile({
+      ...profile,
+      name: trimmedName,
+      phone_country_code: editCountryCode,
+      phone_number: editPhoneNumber,
+      phone: `${editCountryCode}${editPhoneNumber}`,
+    });
     setSavingProfile(false);
     setEditingProfile(false);
   }
@@ -408,19 +411,29 @@ function CustomerDashboardInner() {
                 autoFocus
                 className="bg-bg border border-cleo-border rounded-xl px-4 py-3 text-ink text-base placeholder:text-muted/40 focus:outline-none focus:border-gold transition-colors"
               />
-              <input
-                type="tel"
-                inputMode="numeric"
-                value={editPhone}
-                onChange={(e) => setEditPhone(formatPhone(e.target.value))}
-                placeholder="(555) 000-0000"
-                className="bg-bg border border-cleo-border rounded-xl px-4 py-3 text-ink font-mono text-base placeholder:text-muted/40 focus:outline-none focus:border-gold transition-colors"
-              />
+              <div className="flex gap-2">
+                <input
+                  type="tel"
+                  inputMode="tel"
+                  value={editCountryCode}
+                  onChange={(e) => setEditCountryCode(sanitizeCountryCodeInput(e.target.value))}
+                  placeholder="+91"
+                  className="w-20 flex-shrink-0 bg-bg border border-cleo-border rounded-xl px-3 py-3 text-ink font-mono text-base text-center placeholder:text-muted/40 focus:outline-none focus:border-gold transition-colors"
+                />
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  value={editPhoneNumber}
+                  onChange={(e) => setEditPhoneNumber(sanitizePhoneNumberInput(e.target.value))}
+                  placeholder="98765 43210"
+                  className="flex-1 min-w-0 bg-bg border border-cleo-border rounded-xl px-4 py-3 text-ink font-mono text-base placeholder:text-muted/40 focus:outline-none focus:border-gold transition-colors"
+                />
+              </div>
               {saveError && <p className="text-error text-xs">{saveError}</p>}
               <div className="flex gap-2">
                 <button
                   type="submit"
-                  disabled={savingProfile || !editName.trim() || editPhone.replace(/\D/g, "").length < 10}
+                  disabled={savingProfile || !editName.trim() || !isValidPhone(editCountryCode, editPhoneNumber)}
                   className="flex-1 py-2.5 bg-gold text-bg font-cinzel font-bold text-xs tracking-[0.08em] uppercase rounded-xl border border-gold hover:bg-gold-light transition-colors disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
                 >
                   {savingProfile ? "Saving…" : "Save Changes"}

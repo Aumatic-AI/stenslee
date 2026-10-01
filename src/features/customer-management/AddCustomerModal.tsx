@@ -4,6 +4,7 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 import { usePermissionStore } from "@/store/permission-store";
+import { DEFAULT_COUNTRY_CODE, combinePhone, isValidPhone, sanitizeCountryCodeInput, sanitizePhoneNumberInput } from "@/lib/phone";
 
 interface NewCustomer {
   id: string;
@@ -19,22 +20,16 @@ interface Props {
 
 // Matches the designer dashboard's inline "no matches — create one" form
 // (src/app/(staff)/studio/designer/page.tsx) — same two inputs, same phone
-// formatting/validation, same duplicate-phone pre-check.
-function formatPhone(value: string) {
-  const d = value.replace(/\D/g, "").slice(0, 10);
-  if (d.length <= 3) return d;
-  if (d.length <= 6) return `(${d.slice(0, 3)}) ${d.slice(3)}`;
-  return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
-}
-
+// validation, same duplicate-phone pre-check.
 export default function AddCustomerModal({ onClose, onCreated }: Props) {
   const supabase = createSupabaseBrowserClient();
   const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
+  const [countryCode, setCountryCode] = useState(DEFAULT_COUNTRY_CODE);
+  const [phoneNumber, setPhoneNumber] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  const canSubmit = name.trim().length > 0 && phone.replace(/\D/g, "").length === 10;
+  const canSubmit = name.trim().length > 0 && isValidPhone(countryCode, phoneNumber);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -43,6 +38,7 @@ export default function AddCustomerModal({ onClose, onCreated }: Props) {
     setError("");
 
     // Same duplicate-phone guard as the designer dashboard's create flow.
+    const phone = combinePhone(countryCode, phoneNumber);
     const { data: existing } = await supabase
       .from("customers")
       .select("id, name, phone, created_at")
@@ -64,7 +60,7 @@ export default function AddCustomerModal({ onClose, onCreated }: Props) {
 
     const { data: customer, error: insertError } = await supabase
       .from("customers")
-      .insert({ name: name.trim(), phone, organization_id: organizationId })
+      .insert({ name: name.trim(), phone_country_code: countryCode, phone_number: phoneNumber, organization_id: organizationId })
       .select("id, name, phone, created_at")
       .single();
 
@@ -110,14 +106,24 @@ export default function AddCustomerModal({ onClose, onCreated }: Props) {
             onChange={(e) => setName(e.target.value)}
             className="bg-bg border border-cleo-border rounded-xl px-4 py-3 text-ink text-base placeholder:text-muted/40 focus:outline-none focus:border-gold transition-colors"
           />
-          <input
-            type="tel"
-            inputMode="numeric"
-            placeholder="(555) 000-0000"
-            value={phone}
-            onChange={(e) => setPhone(formatPhone(e.target.value))}
-            className="bg-bg border border-cleo-border rounded-xl px-4 py-3 text-ink font-mono text-base placeholder:text-muted/40 focus:outline-none focus:border-gold transition-colors"
-          />
+          <div className="flex gap-2">
+            <input
+              type="tel"
+              inputMode="tel"
+              placeholder="+91"
+              value={countryCode}
+              onChange={(e) => setCountryCode(sanitizeCountryCodeInput(e.target.value))}
+              className="w-20 flex-shrink-0 bg-bg border border-cleo-border rounded-xl px-3 py-3 text-ink font-mono text-base text-center placeholder:text-muted/40 focus:outline-none focus:border-gold transition-colors"
+            />
+            <input
+              type="tel"
+              inputMode="numeric"
+              placeholder="98765 43210"
+              value={phoneNumber}
+              onChange={(e) => setPhoneNumber(sanitizePhoneNumberInput(e.target.value))}
+              className="flex-1 min-w-0 bg-bg border border-cleo-border rounded-xl px-4 py-3 text-ink font-mono text-base placeholder:text-muted/40 focus:outline-none focus:border-gold transition-colors"
+            />
+          </div>
 
           {error && <p className="text-error text-xs">{error}</p>}
 
