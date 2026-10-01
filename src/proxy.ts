@@ -16,6 +16,7 @@ const PUBLIC_PREFIXES = [
   "/api/placement",
   "/api/pinterest",
   "/api/proxy-image",
+  "/api/whatsapp/webhook",
 ];
 
 function makeSupabaseClient(request: NextRequest, response: { current: NextResponse }) {
