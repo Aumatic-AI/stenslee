@@ -51,10 +51,20 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
     upload_existing: useFeature("upload_existing"),
     rework: useFeature("rework"),
   };
+  // Same "still loading counts as enabled" convention as cameraFeatureEnabled
+  // below -- these gate whether each mode's actual content renders, not just
+  // whether its tab button is clickable (that used to be the only check,
+  // which let a locked mode's full interactive form render if designMode was
+  // ever set to it, e.g. from the store on a returning session).
+  const aiDesignEnabled = modeFeatures.ai_design.loading || modeFeatures.ai_design.enabled;
+  const uploadExistingEnabled = modeFeatures.upload_existing.loading || modeFeatures.upload_existing.enabled;
+  const reworkEnabled = modeFeatures.rework.loading || modeFeatures.rework.enabled;
   const cameraFeature = useFeature("camera_capture");
   const pinterestFeature = useFeature("pinterest_search");
   const browsePreviousFeature = useFeature("browse_previous");
   const textTattooFeature = useFeature("text_tattoo");
+  const enhancePromptFeature = useFeature("enhance_prompt");
+  const enhancePromptEnabled = enhancePromptFeature.loading || enhancePromptFeature.enabled;
   // Treat "still loading" as enabled — avoids a flash of disabled controls
   // before the permission store's first fetch resolves.
   const cameraFeatureEnabled = cameraFeature.loading || cameraFeature.enabled;
@@ -483,17 +493,24 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
         </motion.div>
 
         {/* Locked-mode fallback — the tab above blocks switching to it, but
-            also cover the case where the store already had this mode picked
-            (e.g. from a previous plan) before the current plan's limits loaded. */}
-        {designMode === "direct" && !modeFeatures.upload_existing.loading && !modeFeatures.upload_existing.enabled && (
-          <FeatureLocked message="Upload Existing isn't included in your current plan." />
+            also covers the case where the store already had this mode picked
+            (e.g. a returning session, or a plan downgrade) before the
+            current plan's limits loaded. This now REPLACES that mode's
+            content below (via aiDesignEnabled/uploadExistingEnabled/
+            reworkEnabled also guarding those blocks) instead of just
+            displaying alongside it. */}
+        {designMode === "ai" && !aiDesignEnabled && (
+          <FeatureLocked message="AI Design isn't included in your current plan." onBack={() => router.back()} />
         )}
-        {designMode === "rework" && !modeFeatures.rework.loading && !modeFeatures.rework.enabled && (
-          <FeatureLocked message="Rework isn't included in your current plan." />
+        {designMode === "direct" && !uploadExistingEnabled && (
+          <FeatureLocked message="Upload Existing isn't included in your current plan." onBack={() => router.back()} />
+        )}
+        {designMode === "rework" && !reworkEnabled && (
+          <FeatureLocked message="Rework isn't included in your current plan." onBack={() => router.back()} />
         )}
 
         {/* ── Direct upload card ─────────────────────────────────── */}
-        {designMode === "direct" && (
+        {designMode === "direct" && uploadExistingEnabled && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -621,7 +638,7 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
         )}
 
         {/* ── Rework (cover-up / extend) card ───────────────────── */}
-        {designMode === "rework" && (
+        {designMode === "rework" && reworkEnabled && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -728,7 +745,7 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
         )}
 
         {/* ── AI Design mode content ────────────────────────────── */}
-        {designMode === "ai" && <>
+        {designMode === "ai" && aiDesignEnabled && <>
 
         {/* ── Input card ─────────────────────────────────────────── */}
         <motion.div
@@ -752,10 +769,14 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between gap-2">
               <label className="text-xs font-mono tracking-[0.15em] uppercase text-muted">Describe your tattoo</label>
-              {tattooDescription.trim().length > 0 && (
+              {tattooDescription.trim().length > 0 && !enhancePromptEnabled && (
+                <span className="text-[9px] font-mono uppercase tracking-wider text-muted/60">Enhance: not on your plan</span>
+              )}
+              {tattooDescription.trim().length > 0 && enhancePromptEnabled && (
                 <button
                   type="button"
                   onClick={async () => {
+                    if (!enhancePromptEnabled) return;
                     setEnhancing(true);
                     setEnhancedVariations(null);
                     setEnhanceError(null);
@@ -1063,7 +1084,7 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
                   </div>
                 </motion.div>
               )}
-              {referenceImages.length < 5 && inputMode === "camera" && (
+              {referenceImages.length < 5 && inputMode === "camera" && cameraFeatureEnabled && (
                 <motion.div key="camera" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                   <button
                     onClick={() => setShowCamera(true)}
@@ -1085,7 +1106,7 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
                   </button>
                 </motion.div>
               )}
-              {inputMode === "pinterest" && (
+              {inputMode === "pinterest" && pinterestFeatureEnabled && (
                 <motion.div key="pinterest" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                   <PinterestSearch
                     onAdd={handleAddPinterestPin}
@@ -1127,7 +1148,7 @@ export default function DesignPage({ params }: { params: Promise<{ sessionId: st
 
       {/* ── Sticky mobile CTA bar (AI mode only) — mirrors the primary
           action so the user never has to scroll back up. */}
-      {designMode === "ai" && (
+      {designMode === "ai" && aiDesignEnabled && (
         <div className="sm:hidden fixed bottom-0 inset-x-0 z-30 bg-bg/95 backdrop-blur-md border-t border-cleo-border px-4 pt-3 pb-safe">
           <button
             onClick={handleGenerate}

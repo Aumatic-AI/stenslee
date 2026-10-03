@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 import { useFeature } from "@/lib/permissions/use-feature";
 import { FeatureLocked } from "@/components/ui/FeatureLocked";
@@ -24,6 +25,7 @@ function WhatsAppIcon({ className }: { className?: string }) {
 }
 
 export default function WhatsAppPage() {
+  const router = useRouter();
   const supabase = createSupabaseBrowserClient();
   const whatsappFeature = useFeature("whatsapp");
 
@@ -81,7 +83,11 @@ export default function WhatsAppPage() {
   if (!whatsappFeature.loading && !whatsappFeature.enabled) {
     return (
       <div className="flex-1 flex items-center justify-center px-4">
-        <FeatureLocked title="WhatsApp not available" message="Sending WhatsApp messages isn't included in your current plan." />
+        <FeatureLocked
+          title="WhatsApp not available"
+          message="Sending WhatsApp messages isn't included in your current plan."
+          onBack={() => router.back()}
+        />
       </div>
     );
   }

@@ -358,7 +358,11 @@ function LibraryPageInner() {
   if (!libraryFeature.loading && !libraryFeature.enabled) {
     return (
       <div className="flex-1 px-4 sm:px-6 py-6 sm:py-8 max-w-5xl mx-auto w-full">
-        <FeatureLocked title="Library not available" message="The Design Library isn't included in your current plan." />
+        <FeatureLocked
+          title="Library not available"
+          message="The Design Library isn't included in your current plan."
+          onBack={() => router.back()}
+        />
       </div>
     );
   }

@@ -149,7 +149,11 @@ export default function CustomersPage() {
   if (!customerManagementFeature.loading && !customerManagementFeature.enabled) {
     return (
       <div className="flex-1 flex items-center justify-center px-4">
-        <FeatureLocked title="Customers not available" message="Customer management isn't included in your current plan." />
+        <FeatureLocked
+          title="Customers not available"
+          message="Customer management isn't included in your current plan."
+          onBack={() => router.back()}
+        />
       </div>
     );
   }

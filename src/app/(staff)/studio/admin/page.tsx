@@ -259,7 +259,11 @@ export default function AdminDashboard() {
   if (!dashboardFeature.loading && !dashboardFeature.enabled) {
     return (
       <div className="min-h-[100dvh] bg-bg flex items-center justify-center px-4">
-        <FeatureLocked title="Dashboard not available" message="The studio dashboard isn't included in your current plan." />
+        <FeatureLocked
+          title="Dashboard not available"
+          message="The studio dashboard isn't included in your current plan."
+          onBack={() => router.back()}
+        />
       </div>
     );
   }

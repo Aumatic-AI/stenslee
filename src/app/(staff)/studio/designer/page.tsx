@@ -274,7 +274,10 @@ export default function DesignerDashboard() {
 
         {/* Customer Intake Card */}
         {!customerManagementFeature.loading && !customerManagementFeature.enabled ? (
-          <FeatureLocked message="Customer lookup and creation isn't included in your current plan." />
+          <FeatureLocked
+            message="Customer lookup and creation isn't included in your current plan."
+            onBack={() => router.back()}
+          />
         ) : (
         <motion.div
           initial={{ opacity: 0, y: 16 }}

@@ -12,6 +12,7 @@ import { resolveImageSrc } from "@/lib/image-src";
 import { usePermissionStore } from "@/store/permission-store";
 import { logUsage } from "@/lib/permissions/log-usage";
 import { useFeature } from "@/lib/permissions/use-feature";
+import { FeatureLocked } from "@/components/ui/FeatureLocked";
 
 // Shown when the AI image service rejects the request for exhausted credits.
 // Direct copy so studio staff immediately know the fix is to top up the AI
@@ -89,6 +90,7 @@ async function watchPlacementJob(sessionId: string): Promise<PlacementJobOutcome
 export default function PlacementPage({ params }: { params: Promise<{ sessionId: string }> }) {
   const { sessionId } = use(params);
   const router = useRouter();
+  const placementFeature = useFeature("placement");
   const cameraFeature = useFeature("camera_capture");
   // Treat "still loading" as enabled — avoids a flash of disabled controls
   // before the permission store's first fetch resolves.
@@ -330,6 +332,21 @@ export default function PlacementPage({ params }: { params: Promise<{ sessionId:
     setBodyPhoto(null);
     setPlacementComposite(null);
     setPlacementText("");
+  }
+
+  /* ── Plan gate — this whole page had no client-side check before, only
+     the server route did; a locked org could fill out the entire form and
+     only hit a wall on generate. ──────────────────────────────────── */
+  if (!placementFeature.loading && !placementFeature.enabled) {
+    return (
+      <div className="min-h-[80vh] flex items-center justify-center px-4">
+        <FeatureLocked
+          title="Placement not available"
+          message="Body placement isn't included in your current plan."
+          onBack={() => router.back()}
+        />
+      </div>
+    );
   }
 
   /* ── Done / summary screen ──────────────────────────────────────── */
@@ -576,7 +593,7 @@ export default function PlacementPage({ params }: { params: Promise<{ sessionId:
               )}
 
               {/* Camera mode — step 1: capture body photo */}
-              {inputMode === "camera" && !bodyPhoto && (
+              {inputMode === "camera" && !bodyPhoto && cameraFeatureEnabled && (
                 <motion.div key="camera-empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                   <button
                     onClick={() => setShowCamera(true)}

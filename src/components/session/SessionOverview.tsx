@@ -157,6 +157,8 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
   // read straight from chat_messages instead.
   const [hasChatHistory, setHasChatHistory] = useState(false);
   const printStencilFeature = useFeature("print_stencil");
+  const flashIsolateFeature = useFeature("flash_isolate");
+  const flashIsolateEnabled = flashIsolateFeature.loading || flashIsolateFeature.enabled;
 
   useEffect(() => {
     async function load() {
@@ -257,7 +259,7 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
   }, [session?.id, session?.flow_type, session?.selected_design_key, session?.flash_image_key]);
 
   async function handleGenerateFlash() {
-    if (!session?.selected_design_key) return;
+    if (!session?.selected_design_key || !flashIsolateEnabled) return;
     setFlashState("loading");
     setFlashError(null);
     await startFlashGeneration(sessionId, session.selected_design_key);
@@ -496,10 +498,14 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
                     {resolvedFlashState === "error" && flashError && (
                       <p className="text-error text-[10px] font-mono leading-snug">{flashError}</p>
                     )}
-                    <button onClick={handleGenerateFlash}
-                      className="text-[10px] font-mono uppercase tracking-wider text-gold hover:text-gold-light underline underline-offset-2 cursor-pointer">
-                      {resolvedFlashState === "error" ? "↻ Retry" : "✦ Generate"}
-                    </button>
+                    {!flashIsolateEnabled ? (
+                      <p className="text-muted/60 text-[9px] font-mono uppercase tracking-wider">Not on your plan</p>
+                    ) : (
+                      <button onClick={handleGenerateFlash}
+                        className="text-[10px] font-mono uppercase tracking-wider text-gold hover:text-gold-light underline underline-offset-2 cursor-pointer">
+                        {resolvedFlashState === "error" ? "↻ Retry" : "✦ Generate"}
+                      </button>
+                    )}
                   </div>
                 )
               ) : (
