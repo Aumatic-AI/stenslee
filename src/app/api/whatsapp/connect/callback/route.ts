@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient, createServiceClient } from "@/lib/supabase-server";
 import { requireFeature } from "@/lib/permissions/require-feature";
 import { encryptToken } from "@/lib/whatsapp/crypto";
-import { exchangeCodeForToken, subscribeWabaWebhook, GraphApiError } from "@/lib/whatsapp/graph";
+import { exchangeCodeForToken, subscribeWabaWebhook, registerPhoneNumber, GraphApiError } from "@/lib/whatsapp/graph";
 
 // POST /api/whatsapp/connect/callback — the browser calls this once
 // Embedded Signup finishes: it hands us the one-time `code` from FB.login's
@@ -20,14 +20,20 @@ export async function POST(req: NextRequest) {
   const { data: requester } = await service.from("staff").select("role").eq("id", user!.id).maybeSingle();
   if (requester?.role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const { code, wabaId, phoneNumberId, displayPhoneNumber } = await req.json();
-  if (!code || !wabaId || !phoneNumberId) {
-    return NextResponse.json({ error: "code, wabaId and phoneNumberId are required" }, { status: 400 });
+  const { code, wabaId, phoneNumberId, displayPhoneNumber, pin } = await req.json();
+  if (!code || !wabaId || !phoneNumberId || !pin) {
+    return NextResponse.json({ error: "code, wabaId, phoneNumberId and pin are required" }, { status: 400 });
+  }
+  if (!/^\d{6}$/.test(pin)) {
+    return NextResponse.json({ error: "PIN must be exactly 6 digits" }, { status: 400 });
   }
 
   try {
     const accessToken = await exchangeCodeForToken(code);
     await subscribeWabaWebhook(wabaId, accessToken);
+    // Embedded Signup alone doesn't activate the number for sending -- this
+    // does. Without it, every send fails with error 133010.
+    await registerPhoneNumber(phoneNumberId, accessToken, pin);
 
     const { error } = await service
       .from("organizations")

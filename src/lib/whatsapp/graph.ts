@@ -51,6 +51,19 @@ export async function subscribeWabaWebhook(wabaId: string, accessToken: string) 
   return graphFetch(`/${wabaId}/subscribed_apps`, { method: "POST", accessToken });
 }
 
+// Embedded Signup does not activate the number for sending by itself --
+// without this call, every send fails with error 133010 ("Phone number not
+// registered"). `pin` is the number's existing 2-step-verification PIN if it
+// has one, or any 6-digit PIN to set if it doesn't.
+export async function registerPhoneNumber(phoneNumberId: string, accessToken: string, pin: string) {
+  return graphFetch(`/${phoneNumberId}/register`, {
+    method: "POST",
+    accessToken,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messaging_product: "whatsapp", pin }),
+  });
+}
+
 export interface WhatsAppTemplateComponent {
   type: string;
   text?: string;

@@ -47,12 +47,15 @@ function loadFacebookSdk(onReady: () => void) {
 export default function ConnectWhatsAppButton({ onConnected }: { onConnected: () => void }) {
   const [sdkReady, setSdkReady] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [awaitingPin, setAwaitingPin] = useState(false);
+  const [pin, setPin] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
   // Embedded Signup hands the wabaId/phoneNumberId via a window `message`
   // event and the one-time code via FB.login's own callback -- the two can
-  // arrive in either order, so both are stashed here and the finish step
-  // only fires once both are in.
+  // arrive in either order, so both are stashed here and the PIN step only
+  // shows once both are in.
   const signupDataRef = useRef<EmbeddedSignupData | null>(null);
   const codeRef = useRef<string | null>(null);
 
@@ -70,7 +73,7 @@ export default function ConnectWhatsAppButton({ onConnected }: { onConnected: ()
       if (data.type !== "WA_EMBEDDED_SIGNUP") return;
       if (data.event === "FINISH" && data.data?.waba_id && data.data?.phone_number_id) {
         signupDataRef.current = { wabaId: data.data.waba_id, phoneNumberId: data.data.phone_number_id };
-        void tryFinish();
+        checkBothReady();
       }
       if (data.event === "CANCEL") {
         setConnecting(false);
@@ -78,11 +81,18 @@ export default function ConnectWhatsAppButton({ onConnected }: { onConnected: ()
     }
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function tryFinish() {
+  function checkBothReady() {
     if (!signupDataRef.current || !codeRef.current) return; // wait for the other half
+    setConnecting(false);
+    setAwaitingPin(true);
+  }
+
+  async function handleSubmitPin(e: React.FormEvent) {
+    e.preventDefault();
+    if (!signupDataRef.current || !codeRef.current || !/^\d{6}$/.test(pin)) return;
+    setSubmitting(true);
     setError("");
     try {
       const res = await fetch("/api/whatsapp/connect/callback", {
@@ -92,6 +102,7 @@ export default function ConnectWhatsAppButton({ onConnected }: { onConnected: ()
           code: codeRef.current,
           wabaId: signupDataRef.current.wabaId,
           phoneNumberId: signupDataRef.current.phoneNumberId,
+          pin,
         }),
       });
       const body = await res.json();
@@ -100,9 +111,11 @@ export default function ConnectWhatsAppButton({ onConnected }: { onConnected: ()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to connect");
     } finally {
-      setConnecting(false);
+      setSubmitting(false);
+      setAwaitingPin(false);
       signupDataRef.current = null;
       codeRef.current = null;
+      setPin("");
     }
   }
 
@@ -116,7 +129,7 @@ export default function ConnectWhatsAppButton({ onConnected }: { onConnected: ()
       (response) => {
         if (response.authResponse?.code) {
           codeRef.current = response.authResponse.code;
-          void tryFinish();
+          checkBothReady();
         } else {
           setConnecting(false);
         }
@@ -127,6 +140,30 @@ export default function ConnectWhatsAppButton({ onConnected }: { onConnected: ()
         override_default_response_type: true,
         extras: { setup: {} },
       }
+    );
+  }
+
+  if (awaitingPin) {
+    return (
+      <form onSubmit={handleSubmitPin} className="flex flex-col items-center gap-3 w-full max-w-xs">
+        <p className="text-ink text-sm text-center">
+          Enter this number&rsquo;s 6-digit PIN — the same one from your WhatsApp Business app&rsquo;s two-step verification. If it doesn&rsquo;t have one yet, make one up now; it becomes the PIN going forward.
+        </p>
+        <input
+          type="text"
+          inputMode="numeric"
+          maxLength={6}
+          autoFocus
+          value={pin}
+          onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+          placeholder="••••••"
+          className="w-32 text-center tracking-[0.3em] bg-bg border border-cleo-border rounded-xl px-4 py-3 text-ink font-mono text-lg focus:outline-none focus:border-gold transition-colors"
+        />
+        <Button type="submit" loading={submitting} disabled={pin.length !== 6} size="lg">
+          Finish Connecting
+        </Button>
+        {error && <p className="text-error text-xs text-center max-w-xs">{error}</p>}
+      </form>
     );
   }
 

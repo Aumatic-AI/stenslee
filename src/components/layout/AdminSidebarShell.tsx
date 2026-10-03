@@ -129,6 +129,7 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
   // once, on the very first load — not on every in-app navigation.
   const [admin, setAdmin] = useState<AdminIdentity | null | undefined>(undefined);
   const [trashCount, setTrashCount] = useState(0);
+  const [credits, setCredits] = useState<{ remaining: number; total: number } | null>(null);
 
   // Unseen-count badge for Recently Deleted — re-fetched on every navigation
   // (not just once at mount) so it clears once the admin has actually opened
@@ -152,6 +153,36 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [admin, pathname]);
+
+  // AI credits balance for the sidebar widget -- fetched once per admin
+  // session (credits don't change from in-app navigation, only from
+  // generating images or a Super Admin edit, so no pathname dependency).
+  useEffect(() => {
+    if (!admin) return;
+    let cancelled = false;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data: staffRow } = await supabase
+        .from("staff").select("organization_id").eq("id", user.id).maybeSingle();
+      if (!staffRow?.organization_id) return;
+
+      const { data: org } = await supabase
+        .from("organizations").select("ai_credits_remaining, plan_id").eq("id", staffRow.organization_id).maybeSingle();
+      if (!org) return;
+
+      let total = org.ai_credits_remaining;
+      if (org.plan_id) {
+        const { data: plan } = await supabase
+          .from("plans").select("ai_credits_included").eq("id", org.plan_id).maybeSingle();
+        if (plan) total = plan.ai_credits_included;
+      }
+
+      if (!cancelled) setCredits({ remaining: org.ai_credits_remaining, total });
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [admin]);
 
   useEffect(() => {
     // Runs even on the login pathname now -- skipping it there used to skip
@@ -281,6 +312,10 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
     router.refresh();
   }
 
+  const creditsUsed = credits ? Math.max(0, credits.total - credits.remaining) : 0;
+  const creditsPct = credits && credits.total > 0 ? Math.min(100, (credits.remaining / credits.total) * 100) : 0;
+  const creditsLow = creditsPct < 15;
+
   // Bottom mobile-app-style tab bar is scoped to /studio/admin/* pages only
   // — the customer profile and session-flow pages an admin can also reach
   // (/customer/[userId], /[sessionId]/design|placement) already have their
@@ -340,6 +375,29 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
               <p className="text-muted text-[9px] font-mono uppercase tracking-wider">Admin</p>
             </div>
           </Link>
+
+          {credits && (
+            <div className="px-2">
+              <div className="bg-surface border border-cleo-border rounded-xl px-3 py-2.5 flex flex-col gap-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[9px] font-mono uppercase tracking-wider text-muted">AI Credits</span>
+                  <span className={`text-[10px] font-mono font-bold ${creditsLow ? "text-error" : "text-gold"}`}>
+                    {credits.remaining.toLocaleString()} left
+                  </span>
+                </div>
+                <div className="h-1.5 rounded-full bg-surface-2 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${creditsLow ? "bg-error" : "bg-gold"}`}
+                    style={{ width: `${creditsPct}%` }}
+                  />
+                </div>
+                <p className="text-muted text-[9px] font-mono">
+                  {creditsUsed.toLocaleString()} used · {credits.total.toLocaleString()} total
+                </p>
+              </div>
+            </div>
+          )}
+
           <button
             onClick={handleLogout}
             className="text-muted hover:text-error transition-colors text-xs font-mono tracking-wider px-3 py-2 rounded-lg border border-cleo-border hover:border-error/40 cursor-pointer text-left"
