@@ -4,6 +4,12 @@ import { requireFeature } from "@/lib/permissions/require-feature";
 import { encryptToken } from "@/lib/whatsapp/crypto";
 import { exchangeCodeForToken, subscribeWabaWebhook, registerPhoneNumber, GraphApiError } from "@/lib/whatsapp/graph";
 
+// Meta requires a 6-digit two-step-verification pin on first registration --
+// it's invented by us, not sent by Meta, so one fixed value works for every
+// org. If a number ever needs re-registering elsewhere with the same pin,
+// this is it.
+const DEFAULT_REGISTRATION_PIN = "468024";
+
 // POST /api/whatsapp/connect/callback — the browser calls this once
 // Embedded Signup finishes: it hands us the one-time `code` from FB.login's
 // authResponse plus the wabaId/phoneNumberId Meta posted via the
@@ -20,20 +26,19 @@ export async function POST(req: NextRequest) {
   const { data: requester } = await service.from("staff").select("role").eq("id", user!.id).maybeSingle();
   if (requester?.role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const { code, wabaId, phoneNumberId, displayPhoneNumber, pin } = await req.json();
-  if (!code || !wabaId || !phoneNumberId || !pin) {
-    return NextResponse.json({ error: "code, wabaId, phoneNumberId and pin are required" }, { status: 400 });
-  }
-  if (!/^\d{6}$/.test(pin)) {
-    return NextResponse.json({ error: "PIN must be exactly 6 digits" }, { status: 400 });
+  const { code, wabaId, phoneNumberId, displayPhoneNumber } = await req.json();
+  if (!code || !wabaId || !phoneNumberId) {
+    return NextResponse.json({ error: "code, wabaId and phoneNumberId are required" }, { status: 400 });
   }
 
   try {
     const accessToken = await exchangeCodeForToken(code);
     await subscribeWabaWebhook(wabaId, accessToken);
     // Embedded Signup alone doesn't activate the number for sending -- this
-    // does. Without it, every send fails with error 133010.
-    await registerPhoneNumber(phoneNumberId, accessToken, pin);
+    // does. Without it, every send fails with error 133010. The pin is an
+    // arbitrary 6-digit value Meta has us invent on first registration (it's
+    // never sent to us), so we use a fixed default rather than prompting for one.
+    await registerPhoneNumber(phoneNumberId, accessToken, DEFAULT_REGISTRATION_PIN);
 
     const { error } = await service
       .from("organizations")
