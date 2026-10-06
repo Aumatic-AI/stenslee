@@ -23,7 +23,7 @@ interface SessionDetail {
   completed_at: string | null;
   deleted_at: string | null;
   customers: { name: string; phone: string } | null;
-  designer: { name: string; email: string } | null;
+  designer: { name: string; phone: string } | null;
   selected_design_key: string | null;
   selected_design_style: string | null;
   flash_image_key: string | null;
@@ -180,7 +180,7 @@ export default function SessionOverview({ sessionId, from, defaultBackUrl, defau
         .select(`
           id, style, description, flow_type, status, created_at, completed_at, deleted_at,
           customers(name, phone),
-          designer:staff_id(name, email),
+          designer:staff_id(name, phone),
           selected_design_key, selected_design_style, flash_image_key,
           placement_text, placement_body_photo_key, placement_composite_key
         `)

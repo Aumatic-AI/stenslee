@@ -5,10 +5,13 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { getClientRole } from "@/lib/auth-utils";
+import { DEFAULT_COUNTRY_CODE, isValidPhone, sanitizeCountryCodeInput, sanitizePhoneNumberInput } from "@/lib/phone";
 
 export default function NewDesignerPage() {
   const router = useRouter();
-  const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const [name, setName] = useState("");
+  const [phoneCountryCode, setPhoneCountryCode] = useState(DEFAULT_COUNTRY_CODE);
+  const [phoneNumber, setPhoneNumber] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [serverError, setServerError] = useState("");
@@ -21,9 +24,8 @@ export default function NewDesignerPage() {
 
   function validate() {
     const e: Record<string, string> = {};
-    if (!form.name.trim()) e.name = "Name is required.";
-    if (!form.email.trim()) e.email = "Email is required.";
-    if (form.password.length < 8) e.password = "Password must be at least 8 characters.";
+    if (!name.trim()) e.name = "Name is required.";
+    if (!isValidPhone(phoneCountryCode, phoneNumber)) e.phone = "Enter a valid phone number.";
     return e;
   }
 
@@ -38,7 +40,7 @@ export default function NewDesignerPage() {
     const res = await fetch("/api/studio/designers", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
+      body: JSON.stringify({ name, phoneCountryCode, phoneNumber }),
     });
 
     const data = await res.json();
@@ -50,24 +52,6 @@ export default function NewDesignerPage() {
     }
 
     router.push("/studio/admin");
-  }
-
-  function field(key: keyof typeof form, label: string, type = "text", placeholder = "") {
-    return (
-      <div className="flex flex-col gap-1.5">
-        <label className="text-xs font-mono tracking-[0.15em] uppercase text-muted">{label}</label>
-        <input
-          type={type}
-          placeholder={placeholder}
-          value={form[key]}
-          onChange={(e) => { setForm((p) => ({ ...p, [key]: e.target.value })); setErrors((p) => ({ ...p, [key]: "" })); }}
-          className={`bg-surface border rounded-xl px-4 py-3.5 text-ink text-base placeholder:text-muted/50 focus:outline-none transition-colors ${
-            errors[key] ? "border-error" : "border-cleo-border focus:border-gold"
-          }`}
-        />
-        {errors[key] && <p className="text-error text-xs font-mono">{errors[key]}</p>}
-      </div>
-    );
   }
 
   return (
@@ -93,13 +77,49 @@ export default function NewDesignerPage() {
           <div>
             <p className="text-gold text-[11px] font-mono tracking-[0.2em] uppercase mb-1">Add Designer</p>
             <h1 className="font-cinzel text-2xl font-black text-ink">New Designer Account</h1>
-            <p className="text-muted text-sm mt-1">The designer will use this email and password to log in.</p>
+            <p className="text-muted text-sm mt-1">The designer will log in with this phone number via a WhatsApp code.</p>
           </div>
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            {field("name", "Full Name", "text", "e.g. Jordan Smith")}
-            {field("email", "Email Address", "email", "jordan@studio.com")}
-            {field("password", "Temporary Password", "password", "Min 8 characters")}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-mono tracking-[0.15em] uppercase text-muted">Full Name</label>
+              <input
+                type="text"
+                placeholder="e.g. Jordan Smith"
+                value={name}
+                onChange={(e) => { setName(e.target.value); setErrors((p) => ({ ...p, name: "" })); }}
+                className={`bg-surface border rounded-xl px-4 py-3.5 text-ink text-base placeholder:text-muted/50 focus:outline-none transition-colors ${
+                  errors.name ? "border-error" : "border-cleo-border focus:border-gold"
+                }`}
+              />
+              {errors.name && <p className="text-error text-xs font-mono">{errors.name}</p>}
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-mono tracking-[0.15em] uppercase text-muted">Phone Number</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  inputMode="tel"
+                  value={phoneCountryCode}
+                  onChange={(e) => { setPhoneCountryCode(sanitizeCountryCodeInput(e.target.value)); setErrors((p) => ({ ...p, phone: "" })); }}
+                  className={`w-16 bg-surface border rounded-xl px-3 py-3.5 text-ink text-base text-center focus:outline-none transition-colors ${
+                    errors.phone ? "border-error" : "border-cleo-border focus:border-gold"
+                  }`}
+                />
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="98765 43210"
+                  value={phoneNumber}
+                  onChange={(e) => { setPhoneNumber(sanitizePhoneNumberInput(e.target.value)); setErrors((p) => ({ ...p, phone: "" })); }}
+                  className={`flex-1 bg-surface border rounded-xl px-4 py-3.5 text-ink text-base placeholder:text-muted/50 focus:outline-none transition-colors ${
+                    errors.phone ? "border-error" : "border-cleo-border focus:border-gold"
+                  }`}
+                />
+              </div>
+              {errors.phone && <p className="text-error text-xs font-mono">{errors.phone}</p>}
+            </div>
 
             {serverError && (
               <p className="text-error text-sm font-mono">{serverError}</p>

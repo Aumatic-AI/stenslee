@@ -119,8 +119,22 @@ export async function sendTemplateMessage(
   to: string,
   templateName: string,
   language: string,
-  bodyParameters: string[]
+  bodyParameters: string[],
+  // Fills a template's URL-button placeholder (e.g. an Authentication
+  // template's "Copy code" button has its own {{1}} inside the URL --
+  // https://www.whatsapp.com/otp/code/?...&code={{1}} -- separate from the
+  // body's {{1}}. Omitting this when the template has such a button causes
+  // Meta error 131008, "Required parameter is missing".
+  buttonUrlParameter?: string
 ): Promise<SendTemplateResult> {
+  const components = [
+    ...(bodyParameters.length > 0
+      ? [{ type: "body", parameters: bodyParameters.map((text) => ({ type: "text", text })) }]
+      : []),
+    ...(buttonUrlParameter
+      ? [{ type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: buttonUrlParameter }] }]
+      : []),
+  ];
   return graphFetch(`/${phoneNumberId}/messages`, {
     method: "POST",
     accessToken,
@@ -132,10 +146,25 @@ export async function sendTemplateMessage(
       template: {
         name: templateName,
         language: { code: language },
-        ...(bodyParameters.length > 0
-          ? { components: [{ type: "body", parameters: bodyParameters.map((text) => ({ type: "text", text })) }] }
-          : {}),
+        ...(components.length > 0 ? { components } : {}),
       },
     }),
   });
+}
+
+// Sends a login OTP via the platform's own WhatsApp number (WHATSAPP_AUTH_*
+// env vars) -- separate from every org's own connected WABA, since login
+// isn't scoped to a tenant. Used only by the Send SMS Hook route.
+export async function sendAuthOtp(phone: string, code: string): Promise<SendTemplateResult> {
+  const phoneNumberId = process.env.WHATSAPP_AUTH_PHONE_NUMBER_ID;
+  const accessToken = process.env.WHATSAPP_AUTH_ACCESS_TOKEN;
+  const templateName = process.env.WHATSAPP_AUTH_TEMPLATE_NAME;
+  // Must match the exact language variant chosen when the template was
+  // created in WhatsApp Manager (e.g. "en" vs "en_US") -- a mismatch here is
+  // Meta error 132001, "Template name does not exist in the translation".
+  const language = process.env.WHATSAPP_AUTH_TEMPLATE_LANGUAGE || "en_US";
+  if (!phoneNumberId || !accessToken || !templateName) {
+    throw new Error("WHATSAPP_AUTH_PHONE_NUMBER_ID, WHATSAPP_AUTH_ACCESS_TOKEN and WHATSAPP_AUTH_TEMPLATE_NAME must all be set");
+  }
+  return sendTemplateMessage(phoneNumberId, accessToken, phone, templateName, language, [code], code);
 }

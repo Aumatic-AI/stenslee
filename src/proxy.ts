@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const SESSION_TIMEOUT_MS = 24 * 60 * 60 * 1000; // 24 hours
+const SESSION_TIMEOUT_MS = 72 * 60 * 60 * 1000; // 72 hours
 
 // API routes — pass through without session check
 const PUBLIC_PREFIXES = [
@@ -17,6 +17,7 @@ const PUBLIC_PREFIXES = [
   "/api/pinterest",
   "/api/proxy-image",
   "/api/whatsapp/webhook",
+  "/api/auth/send-whatsapp-otp",
 ];
 
 function makeSupabaseClient(request: NextRequest, response: { current: NextResponse }) {

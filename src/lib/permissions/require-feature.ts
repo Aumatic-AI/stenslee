@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import type { FeatureKey } from "@/lib/permissions/feature-keys";
+import type { Session } from "@supabase/supabase-js";
 
 export interface FeatureAccessInfo {
   enabled: boolean;
@@ -55,16 +56,35 @@ async function withRetry<T>(
 
 export async function checkFeature(featureKey: FeatureKey): Promise<FeatureCheckResult> {
   const supabase = await createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  // getSession() decodes the JWT already sitting in the cookie -- no network
+  // call in the common (non-expired-token) case, unlike getUser() which
+  // always round-trips to the Auth server. Same choice proxy.ts makes, and
+  // for the same reason: on a machine where server-side fetches to Supabase
+  // are flaky (see AGENTS.md), an always-network-bound call here surfaces as
+  // a false "can't verify" failure even with a perfectly valid session,
+  // while the browser's own client (unaffected) shows the user as logged in
+  // the whole time. Still wrapped in withRetry for the rarer case where the
+  // token needs a silent refresh. The staff row lookup below re-confirms
+  // is_active/deleted_at, so a revoked account doesn't silently keep working.
+  const { data: sessionData, error: sessionError } = await withRetry<{ session: Session | null }>(() => supabase.auth.getSession());
+  if (sessionError) {
+    return { allowed: false, organizationId: null, staffId: null, access: null, reason: "check_failed" };
+  }
+  const user = sessionData?.session?.user;
   if (!user) {
     return { allowed: false, organizationId: null, staffId: null, access: null, reason: "unauthenticated" };
   }
 
-  const { data: staff } = await supabase
-    .from("staff")
-    .select("organization_id, is_active, deleted_at")
-    .eq("id", user.id)
-    .maybeSingle();
+  const { data: staff, error: staffError } = await withRetry<{ organization_id: string; is_active: boolean; deleted_at: string | null }>(() =>
+    supabase
+      .from("staff")
+      .select("organization_id, is_active, deleted_at")
+      .eq("id", user.id)
+      .maybeSingle()
+  );
+  if (staffError) {
+    return { allowed: false, organizationId: null, staffId: user.id, access: null, reason: "check_failed" };
+  }
 
   if (!staff || !staff.is_active || staff.deleted_at || !staff.organization_id) {
     return { allowed: false, organizationId: null, staffId: user.id, access: null, reason: "no_organization" };
@@ -151,16 +171,28 @@ export async function requireSeatAvailable(
 ): Promise<{ ok: true; organizationId: string } | { ok: false; response: NextResponse }> {
   const featureKey: FeatureKey = role === "admin" ? "admin_seats" : "designer_seats";
   const supabase = await createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  // See checkFeature's comment -- getSession() avoids the always-network-bound
+  // round-trip getUser() makes, which is what was surfacing as false "not
+  // signed in" failures on a machine with flaky server-side Supabase fetches.
+  const { data: sessionData, error: sessionError } = await withRetry<{ session: Session | null }>(() => supabase.auth.getSession());
+  if (sessionError) {
+    return { ok: false, response: NextResponse.json({ error: "Could not verify your session -- please try again" }, { status: 503 }) };
+  }
+  const user = sessionData?.session?.user;
   if (!user) {
     return { ok: false, response: NextResponse.json({ error: "Not signed in" }, { status: 401 }) };
   }
 
-  const { data: staff } = await supabase
-    .from("staff")
-    .select("organization_id, is_active, deleted_at")
-    .eq("id", user.id)
-    .maybeSingle();
+  const { data: staff, error: staffError } = await withRetry<{ organization_id: string; is_active: boolean; deleted_at: string | null }>(() =>
+    supabase
+      .from("staff")
+      .select("organization_id, is_active, deleted_at")
+      .eq("id", user.id)
+      .maybeSingle()
+  );
+  if (staffError) {
+    return { ok: false, response: NextResponse.json({ error: "Could not verify your account -- please try again" }, { status: 503 }) };
+  }
   if (!staff || !staff.is_active || staff.deleted_at || !staff.organization_id) {
     return {
       ok: false,
@@ -168,10 +200,12 @@ export async function requireSeatAvailable(
     };
   }
 
-  const { data, error } = await supabase.rpc("get_effective_access", {
-    p_organization_id: staff.organization_id,
-    p_feature_key: featureKey,
-  });
+  const { data, error } = await withRetry<Array<{ enabled: boolean; limit_value: number | null }>>(() =>
+    supabase.rpc("get_effective_access", {
+      p_organization_id: staff.organization_id,
+      p_feature_key: featureKey,
+    })
+  );
   if (error || !data || data.length === 0) {
     return {
       ok: false,
@@ -191,13 +225,16 @@ export async function requireSeatAvailable(
   }
 
   if (limitValue !== null) {
-    const { count, error: countError } = await supabase
-      .from("staff")
-      .select("id", { count: "exact", head: true })
-      .eq("organization_id", staff.organization_id)
-      .eq("role", role)
-      .eq("is_active", true)
-      .is("deleted_at", null);
+    const { data: count, error: countError } = await withRetry<number>(async () => {
+      const res = await supabase
+        .from("staff")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", staff.organization_id)
+        .eq("role", role)
+        .eq("is_active", true)
+        .is("deleted_at", null);
+      return { data: res.count, error: res.error };
+    });
     if (countError) {
       return {
         ok: false,

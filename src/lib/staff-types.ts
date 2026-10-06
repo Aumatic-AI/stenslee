@@ -3,7 +3,8 @@ export type StaffRole = "admin" | "designer";
 
 export interface StaffMember {
   id: string;
-  email: string;
+  phone: string;
+  email?: string | null;
   name: string;
   role: StaffRole;
   is_active: boolean;

@@ -13,7 +13,7 @@ import { getStorageUrl } from "@/lib/image-src";
 type DesignerRow = StaffMember & { session_count: number };
 
 const PAGE_SIZE = 10;
-const DESIGNER_SELECT = "id, email, name, role, is_active, created_at, avatar_key";
+const DESIGNER_SELECT = "id, phone, name, role, is_active, created_at, avatar_key";
 
 type ActiveFilter = "all" | "active" | "inactive";
 
@@ -50,7 +50,6 @@ function DesignersPageInner() {
   // Edit modal (name, email, photo, active status)
   const [editingDesigner, setEditingDesigner] = useState<DesignerRow | null>(null);
   const [editName, setEditName] = useState("");
-  const [editEmail, setEditEmail] = useState("");
   const [editActive, setEditActive] = useState(true);
   const [editAvatarPreview, setEditAvatarPreview] = useState<string | null>(null);
   const [editAvatarBase64, setEditAvatarBase64] = useState<string | null>(null);
@@ -176,7 +175,6 @@ function DesignersPageInner() {
   function openEdit(d: DesignerRow) {
     setEditingDesigner(d);
     setEditName(d.name);
-    setEditEmail(d.email);
     setEditActive(d.is_active);
     setEditAvatarPreview(getStorageUrl(d.avatar_key));
     setEditAvatarBase64(null);
@@ -205,9 +203,8 @@ function DesignersPageInner() {
     if (!editingDesigner) return;
 
     const name = editName.trim();
-    const email = editEmail.trim();
-    if (!name || !email) {
-      setEditError("Name and email are required");
+    if (!name) {
+      setEditError("Name is required");
       return;
     }
 
@@ -215,25 +212,22 @@ function DesignersPageInner() {
     setEditError("");
 
     const nameChanged = name !== editingDesigner.name;
-    const emailChanged = email !== editingDesigner.email;
     const activeChanged = editActive !== editingDesigner.is_active;
     const avatarChanged = !!editAvatarBase64;
 
     let updated: StaffMember | null = null;
 
-    if (emailChanged || avatarChanged) {
-      // Changing the login email needs the Supabase Admin API, and the
-      // photo upload needs the storage service role — both only available
-      // server-side. Only take this path when one of them actually changed.
+    if (avatarChanged) {
+      // The photo upload needs the storage service role, only available
+      // server-side. Only take this path when the avatar actually changed.
       const res = await fetch("/api/studio/designers", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id: editingDesigner.id,
           ...(nameChanged ? { name } : {}),
-          ...(emailChanged ? { email } : {}),
           ...(activeChanged ? { is_active: editActive } : {}),
-          ...(avatarChanged ? { avatarBase64: editAvatarBase64 } : {}),
+          avatarBase64: editAvatarBase64,
         }),
       });
 
@@ -256,7 +250,7 @@ function DesignersPageInner() {
         .from("staff")
         .update(updates)
         .eq("id", editingDesigner.id)
-        .select("id, email, name, role, is_active, created_at, avatar_key")
+        .select("id, phone, name, role, is_active, created_at, avatar_key")
         .single();
 
       if (error) {
@@ -396,7 +390,7 @@ function DesignersPageInner() {
                   </div>
                   <div className="min-w-0">
                     <p className="text-ink text-sm font-semibold truncate group-hover:text-gold transition-colors">{d.name}</p>
-                    <p className="text-muted text-xs font-mono truncate">{d.email} · {d.session_count} sessions</p>
+                    <p className="text-muted text-xs font-mono truncate">{d.phone} · {d.session_count} sessions</p>
                   </div>
                 </Link>
 
@@ -524,14 +518,10 @@ function DesignersPageInner() {
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-muted text-[11px] font-mono uppercase tracking-wider">Email</label>
-                  <input
-                    type="email"
-                    value={editEmail}
-                    onChange={(e) => setEditEmail(e.target.value)}
-                    className="w-full bg-bg border border-cleo-border rounded-lg px-3.5 py-2.5 text-ink text-sm focus:outline-none focus:border-gold transition-colors"
-                  />
-                  <p className="text-muted/60 text-[10px]">Changing this changes the login email too.</p>
+                  <span className="text-muted text-[11px] font-mono uppercase tracking-wider">Phone</span>
+                  <p className="text-ink text-sm bg-bg border border-cleo-border rounded-lg px-3.5 py-2.5">
+                    {editingDesigner?.phone}
+                  </p>
                 </div>
 
                 <div className="flex items-center justify-between bg-bg border border-cleo-border rounded-lg px-3.5 py-2.5">

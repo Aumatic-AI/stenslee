@@ -5,15 +5,26 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { motion } from "framer-motion";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
+import {
+  DEFAULT_COUNTRY_CODE,
+  isValidPhone,
+  combinePhone,
+  sanitizeCountryCodeInput,
+  sanitizePhoneNumberInput,
+} from "@/lib/phone";
+import OtpInput from "@/components/ui/OtpInput";
+import { useResendCooldown } from "@/lib/use-resend-cooldown";
 
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [step, setStep] = useState<"phone" | "otp">("phone");
+  const [countryCode, setCountryCode] = useState(DEFAULT_COUNTRY_CODE);
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
+  const resendCooldown = useResendCooldown(isValidPhone(countryCode, phoneNumber) ? combinePhone(countryCode, phoneNumber) : "");
 
   const errorParam = params.get("error");
   const nextPath = params.get("next") ?? "";
@@ -23,16 +34,40 @@ function LoginForm() {
     if (errorParam === "session_expired") setError("Your session has expired. Please sign in again.");
   }, [errorParam]);
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSendCode(e: React.FormEvent) {
     e.preventDefault();
+    if (!isValidPhone(countryCode, phoneNumber)) {
+      setError("Enter a valid phone number.");
+      return;
+    }
     setLoading(true);
     setError("");
 
     const supabase = createSupabaseBrowserClient();
-    const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
+    const { error: otpError } = await supabase.auth.signInWithOtp({ phone: combinePhone(countryCode, phoneNumber) });
+    setLoading(false);
 
-    if (authError) {
-      setError("Invalid email or password.");
+    if (otpError) {
+      setError(otpError.message);
+      return;
+    }
+    setOtp("");
+    setStep("otp");
+    resendCooldown.start();
+  }
+
+  async function handleVerify(e: React.FormEvent) {
+    e.preventDefault();
+    if (otp.length !== 6) return;
+    setLoading(true);
+    setError("");
+
+    const supabase = createSupabaseBrowserClient();
+    const phone = combinePhone(countryCode, phoneNumber);
+    const { error: verifyError } = await supabase.auth.verifyOtp({ phone, token: otp, type: "sms" });
+
+    if (verifyError) {
+      setError("Incorrect or expired code.");
       setLoading(false);
       return;
     }
@@ -61,6 +96,17 @@ function LoginForm() {
     router.refresh();
   }
 
+  async function handleResend() {
+    if (resendCooldown.secondsLeft > 0) return;
+    setLoading(true);
+    setError("");
+    const supabase = createSupabaseBrowserClient();
+    const { error: otpError } = await supabase.auth.signInWithOtp({ phone: combinePhone(countryCode, phoneNumber) });
+    setLoading(false);
+    if (otpError) { setError(otpError.message); return; }
+    resendCooldown.start();
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 24 }}
@@ -83,70 +129,82 @@ function LoginForm() {
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-mono tracking-[0.15em] uppercase text-muted">Email</label>
-          <input
-            type="email"
-            autoComplete="email"
-            placeholder="you@studio.com"
-            value={email}
-            onChange={(e) => { setEmail(e.target.value); setError(""); }}
-            className="bg-surface border border-cleo-border rounded-xl px-4 py-3.5 text-ink text-base placeholder:text-muted/50 focus:outline-none focus:border-gold transition-colors"
-          />
-        </div>
+      {step === "phone" ? (
+        <form onSubmit={handleSendCode} className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-mono tracking-[0.15em] uppercase text-muted">Phone Number</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                inputMode="tel"
+                autoComplete="tel-country-code"
+                value={countryCode}
+                onChange={(e) => { setCountryCode(sanitizeCountryCodeInput(e.target.value)); setError(""); }}
+                className="w-16 bg-surface border border-cleo-border rounded-xl px-3 py-3.5 text-ink text-base text-center focus:outline-none focus:border-gold transition-colors"
+              />
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="tel-national"
+                placeholder="98765 43210"
+                value={phoneNumber}
+                onChange={(e) => { setPhoneNumber(sanitizePhoneNumberInput(e.target.value)); setError(""); }}
+                className="flex-1 bg-surface border border-cleo-border rounded-xl px-4 py-3.5 text-ink text-base placeholder:text-muted/50 focus:outline-none focus:border-gold transition-colors"
+              />
+            </div>
+          </div>
 
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-mono tracking-[0.15em] uppercase text-muted">Password</label>
-          <div className="relative">
-            <input
-              type={showPassword ? "text" : "password"}
-              autoComplete="current-password"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => { setPassword(e.target.value); setError(""); }}
-              className="w-full bg-surface border border-cleo-border rounded-xl px-4 py-3.5 pr-11 text-ink text-base placeholder:text-muted/50 focus:outline-none focus:border-gold transition-colors"
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword((v) => !v)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-gold transition-colors"
-              aria-label={showPassword ? "Hide password" : "Show password"}
-            >
-              {showPassword ? (
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                </svg>
-              ) : (
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                </svg>
-              )}
+          {error && (
+            <motion.p initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} className="text-error text-sm font-mono">
+              {error}
+            </motion.p>
+          )}
+
+          <motion.button
+            type="submit"
+            disabled={loading}
+            whileHover={{ scale: loading ? 1 : 1.02 }}
+            whileTap={{ scale: loading ? 1 : 0.97 }}
+            className="mt-2 w-full bg-gold text-bg font-cinzel font-bold text-base tracking-[0.1em] uppercase py-4 rounded-xl border border-gold hover:bg-gold-light transition-colors shadow-[0_0_24px_rgba(201,168,76,0.2)] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+          >
+            {loading ? "Sending code…" : "Send Code →"}
+          </motion.button>
+        </form>
+      ) : (
+        <form onSubmit={handleVerify} className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-mono tracking-[0.15em] uppercase text-muted">
+              Code sent via WhatsApp to {countryCode}{phoneNumber}
+            </label>
+            <OtpInput value={otp} onChange={(v) => { setOtp(v); setError(""); }} autoFocus />
+          </div>
+
+          {error && (
+            <motion.p initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} className="text-error text-sm font-mono">
+              {error}
+            </motion.p>
+          )}
+
+          <motion.button
+            type="submit"
+            disabled={loading || otp.length !== 6}
+            whileHover={{ scale: loading ? 1 : 1.02 }}
+            whileTap={{ scale: loading ? 1 : 0.97 }}
+            className="mt-2 w-full bg-gold text-bg font-cinzel font-bold text-base tracking-[0.1em] uppercase py-4 rounded-xl border border-gold hover:bg-gold-light transition-colors shadow-[0_0_24px_rgba(201,168,76,0.2)] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+          >
+            {loading ? "Verifying…" : "Verify →"}
+          </motion.button>
+
+          <div className="flex items-center justify-between text-xs font-mono">
+            <button type="button" onClick={() => { setStep("phone"); setError(""); }} className="text-muted hover:text-gold transition-colors cursor-pointer">
+              ← Change number
+            </button>
+            <button type="button" onClick={handleResend} disabled={loading || resendCooldown.secondsLeft > 0} className="text-muted hover:text-gold transition-colors cursor-pointer disabled:opacity-50">
+              {resendCooldown.secondsLeft > 0 ? `Resend in ${resendCooldown.secondsLeft}s` : "Resend code"}
             </button>
           </div>
-        </div>
-
-        {error && (
-          <motion.p
-            initial={{ opacity: 0, y: -4 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="text-error text-sm font-mono"
-          >
-            {error}
-          </motion.p>
-        )}
-
-        <motion.button
-          type="submit"
-          disabled={loading}
-          whileHover={{ scale: loading ? 1 : 1.02 }}
-          whileTap={{ scale: loading ? 1 : 0.97 }}
-          className="mt-2 w-full bg-gold text-bg font-cinzel font-bold text-base tracking-[0.1em] uppercase py-4 rounded-xl border border-gold hover:bg-gold-light transition-colors shadow-[0_0_24px_rgba(201,168,76,0.2)] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
-        >
-          {loading ? "Signing in…" : "Sign In →"}
-        </motion.button>
-      </form>
+        </form>
+      )}
 
       <p className="text-center text-muted text-[10px] font-mono tracking-widest">
         CLEOPATRA INK STUDIO © 2026

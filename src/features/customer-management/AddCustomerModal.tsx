@@ -5,6 +5,8 @@ import { motion } from "framer-motion";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 import { usePermissionStore } from "@/store/permission-store";
 import { DEFAULT_COUNTRY_CODE, combinePhone, isValidPhone, sanitizeCountryCodeInput, sanitizePhoneNumberInput } from "@/lib/phone";
+import OtpInput from "@/components/ui/OtpInput";
+import { useResendCooldown } from "@/lib/use-resend-cooldown";
 
 interface NewCustomer {
   id: string;
@@ -20,18 +22,21 @@ interface Props {
 
 // Matches the designer dashboard's inline "no matches — create one" form
 // (src/app/(staff)/studio/designer/page.tsx) — same two inputs, same phone
-// validation, same duplicate-phone pre-check.
+// validation, same duplicate-phone pre-check, same OTP-verify step.
 export default function AddCustomerModal({ onClose, onCreated }: Props) {
   const supabase = createSupabaseBrowserClient();
+  const [step, setStep] = useState<"details" | "verify">("details");
   const [name, setName] = useState("");
   const [countryCode, setCountryCode] = useState(DEFAULT_COUNTRY_CODE);
   const [phoneNumber, setPhoneNumber] = useState("");
+  const [otp, setOtp] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const resendCooldown = useResendCooldown(isValidPhone(countryCode, phoneNumber) ? combinePhone(countryCode, phoneNumber) : "");
 
   const canSubmit = name.trim().length > 0 && isValidPhone(countryCode, phoneNumber);
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSendCode(e: React.FormEvent) {
     e.preventDefault();
     if (!canSubmit) return;
     setSaving(true);
@@ -48,6 +53,42 @@ export default function AddCustomerModal({ onClose, onCreated }: Props) {
     if (existing) {
       setSaving(false);
       setError(`A customer with this phone number already exists: ${existing.name}.`);
+      return;
+    }
+
+    const res = await fetch("/api/customers/send-verification", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phoneCountryCode: countryCode, phoneNumber }),
+    });
+    setSaving(false);
+
+    if (!res.ok) {
+      const { error: msg } = await res.json().catch(() => ({ error: "Couldn't send the code" }));
+      setError(msg ?? "Couldn't send the code");
+      return;
+    }
+
+    setOtp("");
+    setStep("verify");
+    resendCooldown.start();
+  }
+
+  async function handleVerifyAndCreate(e: React.FormEvent) {
+    e.preventDefault();
+    if (otp.length !== 6) return;
+    setSaving(true);
+    setError("");
+
+    const verifyRes = await fetch("/api/customers/verify-phone", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phoneCountryCode: countryCode, phoneNumber, code: otp }),
+    });
+    if (!verifyRes.ok) {
+      const { error: msg } = await verifyRes.json().catch(() => ({ error: "Incorrect or expired code" }));
+      setSaving(false);
+      setError(msg ?? "Incorrect or expired code");
       return;
     }
 
@@ -71,6 +112,24 @@ export default function AddCustomerModal({ onClose, onCreated }: Props) {
     }
 
     onCreated(customer);
+  }
+
+  async function handleResend() {
+    if (resendCooldown.secondsLeft > 0) return;
+    setSaving(true);
+    setError("");
+    const res = await fetch("/api/customers/send-verification", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phoneCountryCode: countryCode, phoneNumber }),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      const { error: msg } = await res.json().catch(() => ({ error: "Couldn't send the code" }));
+      setError(msg ?? "Couldn't send the code");
+      return;
+    }
+    resendCooldown.start();
   }
 
   return (
@@ -97,7 +156,8 @@ export default function AddCustomerModal({ onClose, onCreated }: Props) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="px-5 sm:px-6 py-5 flex flex-col gap-3">
+        {step === "details" ? (
+        <form onSubmit={handleSendCode} className="px-5 sm:px-6 py-5 flex flex-col gap-3">
           <input
             type="text"
             autoFocus
@@ -132,9 +192,36 @@ export default function AddCustomerModal({ onClose, onCreated }: Props) {
             disabled={!canSubmit || saving}
             className="mt-1 py-3 bg-gold text-bg font-cinzel font-bold text-sm tracking-[0.08em] uppercase rounded-xl border border-gold hover:bg-gold-light transition-colors disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
           >
-            {saving ? "Creating…" : "✦ Add Customer"}
+            {saving ? "Sending…" : "Send Code →"}
           </button>
         </form>
+        ) : (
+        <form onSubmit={handleVerifyAndCreate} className="px-5 sm:px-6 py-5 flex flex-col gap-3">
+          <p className="text-muted text-xs text-center">
+            Code sent via WhatsApp to {countryCode}{phoneNumber}
+          </p>
+          <OtpInput value={otp} onChange={(v) => { setOtp(v); setError(""); }} autoFocus />
+
+          {error && <p className="text-error text-xs text-center">{error}</p>}
+
+          <button
+            type="submit"
+            disabled={otp.length !== 6 || saving}
+            className="mt-1 py-3 bg-gold text-bg font-cinzel font-bold text-sm tracking-[0.08em] uppercase rounded-xl border border-gold hover:bg-gold-light transition-colors disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+          >
+            {saving ? "Verifying…" : "✦ Verify & Add Customer"}
+          </button>
+
+          <div className="flex items-center justify-between text-xs font-mono">
+            <button type="button" onClick={() => { setStep("details"); setError(""); }} className="text-muted hover:text-gold transition-colors cursor-pointer">
+              ← Change number
+            </button>
+            <button type="button" onClick={handleResend} disabled={saving || resendCooldown.secondsLeft > 0} className="text-muted hover:text-gold transition-colors cursor-pointer disabled:opacity-50">
+              {resendCooldown.secondsLeft > 0 ? `Resend in ${resendCooldown.secondsLeft}s` : "Resend code"}
+            </button>
+          </div>
+        </form>
+        )}
       </motion.div>
     </motion.div>
   );

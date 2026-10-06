@@ -127,48 +127,6 @@ export default function AdminSettingsPage() {
     setProfileOpen(false);
   }
 
-  // Password change — collapsed by default, opened via "Change Password"
-  const [passwordOpen, setPasswordOpen] = useState(false);
-  const [current, setCurrent] = useState("");
-  const [next, setNext] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [pwLoading, setPwLoading] = useState(false);
-  const [pwError, setPwError] = useState("");
-  const [pwSuccess, setPwSuccess] = useState(false);
-
-  function closePasswordEdit() {
-    setCurrent(""); setNext(""); setConfirm("");
-    setPwError("");
-    setPasswordOpen(false);
-  }
-
-  async function handlePasswordSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setPwError("");
-
-    if (next.length < 8) { setPwError("New password must be at least 8 characters."); return; }
-    if (next !== confirm) { setPwError("Passwords do not match."); return; }
-
-    setPwLoading(true);
-
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user?.email) { setPwError("Session expired. Please log in again."); setPwLoading(false); return; }
-
-    const { error: signInErr } = await supabase.auth.signInWithPassword({
-      email: user.email,
-      password: current,
-    });
-    if (signInErr) { setPwError("Current password is incorrect."); setPwLoading(false); return; }
-
-    const { error: updateErr } = await supabase.auth.updateUser({ password: next });
-    setPwLoading(false);
-
-    if (updateErr) { setPwError(updateErr.message); return; }
-
-    setPwSuccess(true);
-    setCurrent(""); setNext(""); setConfirm("");
-  }
-
   return (
     <div className="flex-1 px-4 sm:px-6 py-6 sm:py-8 max-w-md mx-auto w-full flex flex-col gap-8">
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
@@ -263,79 +221,6 @@ export default function AdminSettingsPage() {
           </form>
         )}
         {profileSaved && !profileOpen && <p className="text-success text-xs">Saved.</p>}
-      </motion.div>
-
-      {/* Password change */}
-      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.1 }} className="flex flex-col gap-4">
-        <div>
-          <p className="text-gold text-[11px] font-mono tracking-[0.2em] uppercase mb-1">Security</p>
-          <h2 className="font-cinzel text-xl font-black text-ink">Password</h2>
-        </div>
-
-        {pwSuccess ? (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-success/10 border border-success/30 rounded-xl p-5 text-center"
-          >
-            <p className="text-success font-cinzel font-bold tracking-wide">Password updated successfully.</p>
-          </motion.div>
-        ) : !passwordOpen ? (
-          <button
-            onClick={() => setPasswordOpen(true)}
-            className="bg-surface border border-cleo-border rounded-2xl p-5 sm:p-6 flex items-center justify-between gap-3 text-left hover:border-gold/40 transition-colors cursor-pointer"
-          >
-            <div>
-              <p className="text-ink text-sm font-semibold">Change Password</p>
-              <p className="text-muted text-xs font-mono mt-0.5">Update your login password</p>
-            </div>
-            <span className="px-3 py-1.5 text-[10px] font-cinzel font-bold tracking-[0.15em] uppercase rounded-lg border border-gold/40 text-gold flex-shrink-0">
-              Change
-            </span>
-          </button>
-        ) : (
-          <form onSubmit={handlePasswordSubmit} className="bg-surface border border-cleo-border rounded-2xl p-5 sm:p-6 flex flex-col gap-4">
-            {[
-              { label: "Current Password", value: current, onChange: setCurrent },
-              { label: "New Password", value: next, onChange: setNext },
-              { label: "Confirm New Password", value: confirm, onChange: setConfirm },
-            ].map(({ label, value, onChange }, i) => (
-              <div key={label} className="flex flex-col gap-1.5">
-                <label className="text-xs font-mono tracking-[0.15em] uppercase text-muted">{label}</label>
-                <input
-                  type="password"
-                  placeholder="••••••••"
-                  value={value}
-                  onChange={(e) => { onChange(e.target.value); setPwError(""); }}
-                  autoFocus={i === 0}
-                  className="bg-bg border border-cleo-border rounded-xl px-4 py-3.5 text-ink text-base placeholder:text-muted/50 focus:outline-none focus:border-gold transition-colors"
-                />
-              </div>
-            ))}
-
-            {pwError && <p className="text-error text-sm font-mono">{pwError}</p>}
-
-            <div className="flex gap-2 mt-1">
-              <button
-                type="button"
-                onClick={closePasswordEdit}
-                disabled={pwLoading}
-                className="px-4 py-3 text-xs font-cinzel font-bold uppercase tracking-widest rounded-xl text-muted hover:text-ink transition-colors cursor-pointer disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <motion.button
-                type="submit"
-                disabled={pwLoading}
-                whileHover={{ scale: pwLoading ? 1 : 1.02 }}
-                whileTap={{ scale: 0.97 }}
-                className="flex-1 bg-gold text-bg font-cinzel font-bold text-sm tracking-[0.08em] uppercase py-3 rounded-xl border border-gold hover:bg-gold-light transition-colors disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
-              >
-                {pwLoading ? "Updating…" : "Update Password →"}
-              </motion.button>
-            </div>
-          </form>
-        )}
       </motion.div>
     </div>
   );

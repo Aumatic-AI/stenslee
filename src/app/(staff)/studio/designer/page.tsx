@@ -11,7 +11,9 @@ import type { StaffMember } from "@/lib/staff-types";
 import { getStorageUrl } from "@/lib/image-src";
 import { useFeature } from "@/lib/permissions/use-feature";
 import { FeatureLocked } from "@/components/ui/FeatureLocked";
-import { DEFAULT_COUNTRY_CODE, isValidPhone, sanitizeCountryCodeInput, sanitizePhoneNumberInput } from "@/lib/phone";
+import { DEFAULT_COUNTRY_CODE, combinePhone, isValidPhone, sanitizeCountryCodeInput, sanitizePhoneNumberInput } from "@/lib/phone";
+import OtpInput from "@/components/ui/OtpInput";
+import { useResendCooldown } from "@/lib/use-resend-cooldown";
 
 interface CustomerResult {
   id: string;
@@ -43,6 +45,10 @@ export default function DesignerDashboard() {
   const [name, setName] = useState("");
   const [newCountryCode, setNewCountryCode] = useState(DEFAULT_COUNTRY_CODE);
   const [newPhoneNumber, setNewPhoneNumber] = useState("");
+  const [createStep, setCreateStep] = useState<"details" | "verify">("details");
+  const [otp, setOtp] = useState("");
+  const [sendingCode, setSendingCode] = useState(false);
+  const resendCooldown = useResendCooldown(isValidPhone(newCountryCode, newPhoneNumber) ? combinePhone(newCountryCode, newPhoneNumber) : "");
   const [searching, setSearching] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -61,7 +67,7 @@ export default function DesignerDashboard() {
 
       const { data: staffRow } = await supabase
         .from("staff")
-        .select("id, email, name, role, is_active, created_at, avatar_key")
+        .select("id, phone, name, role, is_active, created_at, avatar_key")
         .eq("id", user.id)
         .maybeSingle();
 
@@ -119,6 +125,7 @@ export default function DesignerDashboard() {
     // without changing any actual timing/behavior.
     function run() {
       setSelectedCustomer(null);
+      setCreateStep("details");
       const q = query.trim();
       if (q.length < MIN_QUERY_LENGTH) {
         setSearchResults(null);
@@ -184,11 +191,48 @@ export default function DesignerDashboard() {
     }
   }
 
-  async function handleCreateNew(e: React.FormEvent) {
+  async function handleSendCode(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim() || !isValidPhone(newCountryCode, newPhoneNumber)) return;
+    setSendingCode(true);
+    setStartError("");
+
+    const res = await fetch("/api/customers/send-verification", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phoneCountryCode: newCountryCode, phoneNumber: newPhoneNumber }),
+    });
+    setSendingCode(false);
+
+    if (!res.ok) {
+      const { error } = await res.json().catch(() => ({ error: "Couldn't send the code" }));
+      setStartError(error ?? "Couldn't send the code");
+      return;
+    }
+
+    setOtp("");
+    setCreateStep("verify");
+    resendCooldown.start();
+  }
+
+  async function handleVerifyAndCreate(e: React.FormEvent) {
+    e.preventDefault();
+    if (otp.length !== 6) return;
     setStarting(true);
     setStartError("");
+
+    const verifyRes = await fetch("/api/customers/verify-phone", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phoneCountryCode: newCountryCode, phoneNumber: newPhoneNumber, code: otp }),
+    });
+    if (!verifyRes.ok) {
+      const { error } = await verifyRes.json().catch(() => ({ error: "Incorrect or expired code" }));
+      setStarting(false);
+      setStartError(error ?? "Incorrect or expired code");
+      return;
+    }
+
     try {
       const { sessionId, userId } = await startSession(name.trim(), newCountryCode, newPhoneNumber);
 
@@ -202,6 +246,24 @@ export default function DesignerDashboard() {
       setStartError(err instanceof Error ? err.message : "Couldn't create the customer.");
       setStarting(false);
     }
+  }
+
+  async function handleResendCode() {
+    if (resendCooldown.secondsLeft > 0) return;
+    setSendingCode(true);
+    setStartError("");
+    const res = await fetch("/api/customers/send-verification", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phoneCountryCode: newCountryCode, phoneNumber: newPhoneNumber }),
+    });
+    setSendingCode(false);
+    if (!res.ok) {
+      const { error } = await res.json().catch(() => ({ error: "Couldn't send the code" }));
+      setStartError(error ?? "Couldn't send the code");
+      return;
+    }
+    resendCooldown.start();
   }
 
   async function handleLogout() {
@@ -379,13 +441,13 @@ export default function DesignerDashboard() {
             )}
 
             {/* No matches — show create form */}
-            {searchResults && searchResults.length === 0 && (
+            {searchResults && searchResults.length === 0 && createStep === "details" && (
               <motion.form
                 key="not_found"
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
-                onSubmit={handleCreateNew}
+                onSubmit={handleSendCode}
                 className="flex flex-col gap-3 pt-1 border-t border-cleo-border"
               >
                 <p className="text-muted text-xs">
@@ -419,11 +481,46 @@ export default function DesignerDashboard() {
                 {startError && <p className="text-error text-xs">{startError}</p>}
                 <button
                   type="submit"
-                  disabled={starting || !name.trim() || !isValidPhone(newCountryCode, newPhoneNumber)}
+                  disabled={sendingCode || !name.trim() || !isValidPhone(newCountryCode, newPhoneNumber)}
                   className="py-3 bg-gold text-bg font-cinzel font-bold text-sm tracking-[0.08em] uppercase rounded-xl border border-gold hover:bg-gold-light transition-colors disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
                 >
-                  {starting ? "Creating…" : "✦ Create Account & Start Design"}
+                  {sendingCode ? "Sending…" : "Send Code →"}
                 </button>
+              </motion.form>
+            )}
+
+            {/* Verify the customer's phone via WhatsApp code before the
+                account can actually be created -- customers_require_phone_
+                verification trigger enforces this server-side regardless. */}
+            {searchResults && searchResults.length === 0 && createStep === "verify" && (
+              <motion.form
+                key="verify_phone"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                onSubmit={handleVerifyAndCreate}
+                className="flex flex-col gap-3 pt-1 border-t border-cleo-border"
+              >
+                <p className="text-muted text-xs text-center">
+                  Code sent via WhatsApp to {newCountryCode}{newPhoneNumber}
+                </p>
+                <OtpInput value={otp} onChange={(v) => { setOtp(v); setStartError(""); }} autoFocus />
+                {startError && <p className="text-error text-xs text-center">{startError}</p>}
+                <button
+                  type="submit"
+                  disabled={starting || otp.length !== 6}
+                  className="py-3 bg-gold text-bg font-cinzel font-bold text-sm tracking-[0.08em] uppercase rounded-xl border border-gold hover:bg-gold-light transition-colors disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  {starting ? "Creating…" : "✦ Verify & Start Design"}
+                </button>
+                <div className="flex items-center justify-between text-xs font-mono">
+                  <button type="button" onClick={() => { setCreateStep("details"); setStartError(""); }} className="text-muted hover:text-gold transition-colors cursor-pointer">
+                    ← Change number
+                  </button>
+                  <button type="button" onClick={handleResendCode} disabled={sendingCode || resendCooldown.secondsLeft > 0} className="text-muted hover:text-gold transition-colors cursor-pointer disabled:opacity-50">
+                    {resendCooldown.secondsLeft > 0 ? `Resend in ${resendCooldown.secondsLeft}s` : "Resend code"}
+                  </button>
+                </div>
               </motion.form>
             )}
           </AnimatePresence>
