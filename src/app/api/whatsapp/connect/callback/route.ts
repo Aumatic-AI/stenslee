@@ -2,20 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient, createServiceClient } from "@/lib/supabase-server";
 import { requireFeature } from "@/lib/permissions/require-feature";
 import { encryptToken } from "@/lib/whatsapp/crypto";
-import { exchangeCodeForToken, subscribeWabaWebhook, registerPhoneNumber, GraphApiError } from "@/lib/whatsapp/graph";
+import {
+  exchangeCodeForToken,
+  subscribeWabaWebhook,
+  registerPhoneNumber,
+  listPhoneNumbers,
+  requestSmbAppSync,
+  GraphApiError,
+} from "@/lib/whatsapp/graph";
 
-// Meta requires a 6-digit two-step-verification pin on first registration --
-// it's invented by us, not sent by Meta, so one fixed value works for every
-// org. If a number ever needs re-registering elsewhere with the same pin,
-// this is it.
+// 2-step PIN we set when registering a brand-new (non-coexistence) number.
 const DEFAULT_REGISTRATION_PIN = "468024";
 
-// POST /api/whatsapp/connect/callback — the browser calls this once
-// Embedded Signup finishes: it hands us the one-time `code` from FB.login's
-// authResponse plus the wabaId/phoneNumberId Meta posted via the
-// WA_EMBEDDED_SIGNUP window message. We exchange the code for a permanent
-// token server-side (the app secret never reaches the browser) and wire the
-// webhook before saving anything.
+// POST /api/whatsapp/connect/callback — finishes Embedded Signup: swaps the code for a token, then saves the number.
 export async function POST(req: NextRequest) {
   const check = await requireFeature("whatsapp");
   if (!check.ok) return check.response;
@@ -26,26 +25,36 @@ export async function POST(req: NextRequest) {
   const { data: requester } = await service.from("staff").select("role").eq("id", user!.id).maybeSingle();
   if (requester?.role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const { code, wabaId, phoneNumberId, displayPhoneNumber } = await req.json();
-  if (!code || !wabaId || !phoneNumberId) {
-    return NextResponse.json({ error: "code, wabaId and phoneNumberId are required" }, { status: 400 });
+  const { code, wabaId, phoneNumberId, coexistence } = await req.json();
+  if (!code || !wabaId) {
+    return NextResponse.json({ error: "code and wabaId are required" }, { status: 400 });
   }
 
   try {
     const accessToken = await exchangeCodeForToken(code);
     await subscribeWabaWebhook(wabaId, accessToken);
-    // Embedded Signup alone doesn't activate the number for sending -- this
-    // does. Without it, every send fails with error 133010. The pin is an
-    // arbitrary 6-digit value Meta has us invent on first registration (it's
-    // never sent to us), so we use a fixed default rather than prompting for one.
-    await registerPhoneNumber(phoneNumberId, accessToken, DEFAULT_REGISTRATION_PIN);
+
+    const numbers = await listPhoneNumbers(wabaId, accessToken);
+    const number = numbers.find((n) => n.id === phoneNumberId) ?? numbers[0];
+    if (!number) {
+      return NextResponse.json({ error: "No phone number found on this WhatsApp account" }, { status: 400 });
+    }
+
+    if (coexistence) {
+      // Already registered by the WhatsApp Business app; we only trigger the syncs Meta requires and ignore the data.
+      await requestSmbAppSync(number.id, accessToken, "smb_app_state_sync");
+      await requestSmbAppSync(number.id, accessToken, "history");
+    } else {
+      // A brand-new number isn't active for sending until it's registered (else error 133010).
+      await registerPhoneNumber(number.id, accessToken, DEFAULT_REGISTRATION_PIN);
+    }
 
     const { error } = await service
       .from("organizations")
       .update({
         whatsapp_waba_id: wabaId,
-        whatsapp_phone_number_id: phoneNumberId,
-        whatsapp_display_phone_number: displayPhoneNumber ?? null,
+        whatsapp_phone_number_id: number.id,
+        whatsapp_display_phone_number: number.display_phone_number ?? null,
         whatsapp_access_token_enc: encryptToken(accessToken),
         whatsapp_connected_at: new Date().toISOString(),
       })

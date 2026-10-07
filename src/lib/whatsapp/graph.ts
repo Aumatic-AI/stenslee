@@ -64,6 +64,29 @@ export async function registerPhoneNumber(phoneNumberId: string, accessToken: st
   });
 }
 
+// Coexistence's finish event only returns the WABA id, so the number is looked up here.
+export async function listPhoneNumbers(
+  wabaId: string,
+  accessToken: string
+): Promise<Array<{ id: string; display_phone_number: string }>> {
+  const body = await graphFetch(`/${wabaId}/phone_numbers?fields=id,display_phone_number`, { method: "GET", accessToken });
+  return body?.data ?? [];
+}
+
+// Coexistence: both syncs must be requested within 24h of onboarding or Meta disconnects the number.
+export async function requestSmbAppSync(
+  phoneNumberId: string,
+  accessToken: string,
+  syncType: "smb_app_state_sync" | "history"
+) {
+  return graphFetch(`/${phoneNumberId}/smb_app_data`, {
+    method: "POST",
+    accessToken,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messaging_product: "whatsapp", sync_type: syncType }),
+  });
+}
+
 export interface WhatsAppTemplateComponent {
   type: string;
   text?: string;

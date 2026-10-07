@@ -1,5 +1,5 @@
 // ============================================================
-// CLEOPATRA INK STUDIO — All AI Prompts
+// STENSLEE STUDIO — All AI Prompts
 // Edit this file to tune what gets sent to the image model.
 // ============================================================
 

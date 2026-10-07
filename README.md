@@ -1,4 +1,4 @@
-# Cleopatra Ink Studio
+# Stenslee Studio
 
 AI-powered tattoo design platform for **in-shop use by staff**. A designer looks up (or creates) a customer by phone, runs the flow — style → generate → refine → placement → finalize — and prints an A4 stencil. Customers never log in; staff act on their behalf.
 

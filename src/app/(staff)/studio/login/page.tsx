@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState, useEffect } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { motion } from "framer-motion";
@@ -15,6 +15,21 @@ import {
 import OtpInput from "@/components/ui/OtpInput";
 import { useResendCooldown } from "@/lib/use-resend-cooldown";
 
+const NOT_REGISTERED = "This number isn't registered. Ask your studio admin to add you.";
+
+// Messages for the ?error= reasons the proxy and session guard redirect with.
+const ERROR_PARAM_MESSAGES: Record<string, string> = {
+  access_denied: "Your account has been deactivated. Contact the admin.",
+  session_expired: "Your session has expired. Please sign in again.",
+  signed_in_elsewhere: "You were logged out because your account was signed in on another device.",
+};
+
+// Unknown numbers get "otp_disabled" from Supabase or a "not registered" refusal from the SMS hook.
+function otpErrorMessage(err: { message: string; code?: string }) {
+  if (err.code === "otp_disabled" || /(isn't|not) registered/i.test(err.message)) return NOT_REGISTERED;
+  return err.message;
+}
+
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
@@ -23,16 +38,10 @@ function LoginForm() {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(() => ERROR_PARAM_MESSAGES[params.get("error") ?? ""] ?? "");
   const resendCooldown = useResendCooldown(isValidPhone(countryCode, phoneNumber) ? combinePhone(countryCode, phoneNumber) : "");
 
-  const errorParam = params.get("error");
   const nextPath = params.get("next") ?? "";
-
-  useEffect(() => {
-    if (errorParam === "access_denied") setError("Your account has been deactivated. Contact the admin.");
-    if (errorParam === "session_expired") setError("Your session has expired. Please sign in again.");
-  }, [errorParam]);
 
   async function handleSendCode(e: React.FormEvent) {
     e.preventDefault();
@@ -44,11 +53,15 @@ function LoginForm() {
     setError("");
 
     const supabase = createSupabaseBrowserClient();
-    const { error: otpError } = await supabase.auth.signInWithOtp({ phone: combinePhone(countryCode, phoneNumber) });
+    const { error: otpError } = await supabase.auth.signInWithOtp({
+      phone: combinePhone(countryCode, phoneNumber),
+      // Only staff an admin already added can sign in -- never create accounts here.
+      options: { shouldCreateUser: false },
+    });
     setLoading(false);
 
     if (otpError) {
-      setError(otpError.message);
+      setError(otpErrorMessage(otpError));
       return;
     }
     setOtp("");
@@ -80,16 +93,21 @@ function LoginForm() {
       .maybeSingle();
 
     if (!staff || !staff.is_active || staff.deleted_at) {
-      await supabase.auth.signOut();
-      setError("Your account has been deactivated. Contact the admin.");
+      await supabase.auth.signOut({ scope: "local" });
+      setError(staff ? "Your account has been deactivated. Contact the admin." : NOT_REGISTERED);
       setLoading(false);
       return;
     }
 
-    await supabase
-      .from("staff")
-      .update({ last_login_at: new Date().toISOString() })
-      .eq("id", user!.id);
+    // Make this login the only active one, then end every other device's session.
+    const { error: claimError } = await supabase.rpc("claim_staff_session");
+    if (claimError) {
+      await supabase.auth.signOut({ scope: "local" });
+      setError("Couldn't finish signing in. Please try again.");
+      setLoading(false);
+      return;
+    }
+    await supabase.auth.signOut({ scope: "others" });
 
     const dest = nextPath || (staff.role === "admin" ? "/studio/admin" : "/studio/designer");
     router.push(dest);
@@ -101,9 +119,13 @@ function LoginForm() {
     setLoading(true);
     setError("");
     const supabase = createSupabaseBrowserClient();
-    const { error: otpError } = await supabase.auth.signInWithOtp({ phone: combinePhone(countryCode, phoneNumber) });
+    const { error: otpError } = await supabase.auth.signInWithOtp({
+      phone: combinePhone(countryCode, phoneNumber),
+      // Only staff an admin already added can sign in -- never create accounts here.
+      options: { shouldCreateUser: false },
+    });
     setLoading(false);
-    if (otpError) { setError(otpError.message); return; }
+    if (otpError) { setError(otpErrorMessage(otpError)); return; }
     resendCooldown.start();
   }
 
@@ -115,13 +137,9 @@ function LoginForm() {
       className="w-full max-w-sm z-10 flex flex-col gap-8"
     >
       <div className="flex flex-col items-center gap-3">
-        <div className="w-16 h-16 relative">
-          <Image src="/cleopatra-logo.svg" alt="Cleopatra Ink Studio" fill className="object-contain" />
-        </div>
-        <div className="text-center">
-          <h1 className="font-cinzel text-2xl font-black tracking-[0.12em] text-ink uppercase">Cleopatra</h1>
-          <p className="font-cinzel text-xs font-bold tracking-[0.22em] text-gold uppercase">Ink Studio</p>
-        </div>
+        <h1>
+          <Image src="/stenslee-logo.png" alt="Stenslee" width={886} height={167} priority className="h-10 w-auto" />
+        </h1>
         <div className="flex items-center gap-3 w-full">
           <div className="flex-1 h-px bg-gradient-to-r from-transparent to-gold/30" />
           <span className="text-[10px] font-mono tracking-[0.2em] text-muted uppercase">Staff Portal</span>
@@ -207,7 +225,7 @@ function LoginForm() {
       )}
 
       <p className="text-center text-muted text-[10px] font-mono tracking-widest">
-        CLEOPATRA INK STUDIO © 2026
+        STENSLEE © 2026
       </p>
     </motion.div>
   );

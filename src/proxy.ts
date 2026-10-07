@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { getSessionId, isReplacedSession } from "@/lib/session-id";
 
 const SESSION_TIMEOUT_MS = 72 * 60 * 60 * 1000; // 72 hours
 
@@ -8,7 +9,6 @@ const SESSION_TIMEOUT_MS = 72 * 60 * 60 * 1000; // 72 hours
 const PUBLIC_PREFIXES = [
   "/_next/",
   "/favicon",
-  "/cleopatra-logo",
   "/placeholder",
   "/api/generate",
   "/api/upload",
@@ -100,14 +100,17 @@ export async function proxy(request: NextRequest) {
   const staffQueryTimeout = setTimeout(() => staffQueryController.abort(), 1500);
   const { data: staff, error: staffError } = await supabase
     .from("staff")
-    .select("role, is_active, last_login_at, deleted_at")
+    .select("role, is_active, last_login_at, deleted_at, current_session_id")
     .eq("id", session.user.id)
     .abortSignal(staffQueryController.signal)
     .maybeSingle();
   clearTimeout(staffQueryTimeout);
 
   const known = !staffError;
-  const valid = known && !!staff && staff.is_active && !staff.deleted_at && !isSessionExpired(staff.last_login_at);
+  // Same account signed in on another device since this session started.
+  const replaced = known && !!staff && isReplacedSession(staff.current_session_id, getSessionId(session.access_token));
+  const valid =
+    known && !!staff && staff.is_active && !staff.deleted_at && !isSessionExpired(staff.last_login_at) && !replaced;
 
   // ── /studio/login — redirect to dashboard if already valid session ──
   if (pathname === "/studio/login") {
@@ -115,14 +118,19 @@ export async function proxy(request: NextRequest) {
       const dest = staff!.role === "admin" ? "/studio/admin" : "/studio/designer";
       return NextResponse.redirect(new URL(dest, request.url));
     }
-    if (known) await supabase.auth.signOut();
+    // Local scope: a global sign-out here would also end the account's other (valid) devices.
+    if (known) await supabase.auth.signOut({ scope: "local" });
     return response.current;
   }
 
   // Confirmed invalid (not "couldn't check") — sign out and bounce
   if (known && !valid) {
-    await supabase.auth.signOut();
-    const reason = staff && isSessionExpired(staff.last_login_at) ? "session_expired" : "access_denied";
+    await supabase.auth.signOut({ scope: "local" });
+    const reason = replaced
+      ? "signed_in_elsewhere"
+      : staff && isSessionExpired(staff.last_login_at)
+        ? "session_expired"
+        : "access_denied";
     return NextResponse.redirect(new URL(`/studio/login?error=${reason}`, request.url));
   }
 

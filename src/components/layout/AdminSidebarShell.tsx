@@ -258,24 +258,18 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
           transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
           className="flex flex-col items-center gap-6 z-10"
         >
-          <div className="w-40 h-40 sm:w-56 sm:h-56 relative drop-shadow-2xl">
-            <Image
-              src="/cleopatra-logo.svg"
-              alt="Cleopatra Ink Studio"
-              fill
-              className="object-contain"
-              priority
-            />
-          </div>
-
-          <div className="text-center flex flex-col gap-1">
-            <h1 className="font-cinzel text-4xl sm:text-5xl font-black tracking-[0.12em] text-ink uppercase leading-none">
-              Cleopatra
+          <div className="text-center flex flex-col items-center gap-1">
+            <h1>
+              <Image
+                src="/stenslee-logo.png"
+                alt="Stenslee"
+                width={886}
+                height={167}
+                priority
+                className="h-12 sm:h-16 w-auto drop-shadow-2xl"
+              />
             </h1>
-            <h2 className="font-cinzel text-xl sm:text-2xl font-bold tracking-[0.22em] text-gold uppercase">
-              Ink Studio
-            </h2>
-            <div className="flex items-center gap-3 my-2">
+            <div className="flex items-center gap-3 my-2 w-full">
               <div className="flex-1 h-px bg-gradient-to-r from-transparent to-gold/40" />
               <div className="w-1 h-1 rounded-full bg-gold rotate-45" />
               <div className="flex-1 h-px bg-gradient-to-l from-transparent to-gold/40" />
@@ -292,7 +286,7 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
         </motion.div>
 
         <p className="absolute bottom-6 text-muted text-[10px] font-mono tracking-widest z-10">
-          CLEOPATRA INK STUDIO © 2026
+          STENSLEE © 2026
         </p>
       </main>
     );
@@ -330,14 +324,9 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
           below instead — a fixed 224px rail left too little room for the
           dashboard's content at those widths. Fixed in place; only <main> scrolls. */}
       <aside className="hidden lg:flex lg:flex-col w-64 flex-shrink-0 min-h-0 border-r border-cleo-border bg-surface/40 px-4 py-6 gap-6 overflow-y-auto">
-        <div className="flex items-center gap-2.5 px-2">
-          <div className="w-7 h-7 relative flex-shrink-0">
-            <Image src="/cleopatra-logo.svg" alt="Cleopatra" fill className="object-contain" />
-          </div>
-          <div>
-            <p className="font-cinzel text-[11px] font-bold tracking-[0.15em] text-gold uppercase leading-none">Cleopatra Ink</p>
-            <p className="text-[10px] font-mono text-muted tracking-wider leading-none mt-0.5">Admin Portal</p>
-          </div>
+        <div className="flex flex-col gap-1.5 px-2">
+          <Image src="/stenslee-logo.png" alt="Stenslee" width={886} height={167} className="h-6 w-auto self-start" />
+          <p className="text-[10px] font-mono text-muted tracking-wider leading-none">Admin Portal</p>
         </div>
 
         <nav className="flex flex-col gap-1">
@@ -410,12 +399,7 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
       {/* Top tab bar — phone through tablet/split-screen widths */}
       <div className="lg:hidden border-b border-cleo-border bg-surface/40 flex-shrink-0">
         <div className="flex items-center justify-between px-4 pt-4 pb-2">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 relative flex-shrink-0">
-              <Image src="/cleopatra-logo.svg" alt="Cleopatra" fill className="object-contain" />
-            </div>
-            <p className="font-cinzel text-[11px] font-bold tracking-[0.15em] text-gold uppercase leading-none">Cleopatra Ink</p>
-          </div>
+          <Image src="/stenslee-logo.png" alt="Stenslee" width={886} height={167} className="h-5 w-auto" />
           <button
             onClick={handleLogout}
             className="text-muted hover:text-error transition-colors text-[10px] font-mono tracking-wider px-2.5 py-1.5 rounded-lg border border-cleo-border cursor-pointer"

@@ -337,9 +337,7 @@ function CustomerDashboardInner() {
           <span className="hidden sm:inline">{backLabel}</span>
         </button>
 
-        <p className="font-cinzel text-[11px] sm:text-xs tracking-[0.2em] text-gold uppercase truncate">
-          Cleopatra Ink
-        </p>
+        <Image src="/stenslee-logo.png" alt="Stenslee" width={886} height={167} className="h-5 w-auto" />
 
         <motion.button
           onClick={handleNewTattoo}

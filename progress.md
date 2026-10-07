@@ -1,4 +1,4 @@
-# Cleopatra Ink Studio — Progress Tracker
+# Stenslee Studio — Progress Tracker
 
 _Last updated: 2026-06-05 (2)_
 

@@ -6,6 +6,11 @@ const nextConfig: NextConfig = {
   // console fills with "WebSocket connection ... failed" on every retry.
   // Update this if the ngrok subdomain changes (a new tunnel = a new one).
   allowedDevOrigins: ["privatize-cornbread-procreate.ngrok-free.dev"],
+  // Dev only: keep compiled routes loaded so the SMS hook doesn't recompile past Supabase's 5s limit.
+  onDemandEntries: {
+    maxInactiveAge: 24 * 60 * 60 * 1000,
+    pagesBufferLength: 100,
+  },
   images: {
     remotePatterns: [
       {

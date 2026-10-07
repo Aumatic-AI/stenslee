@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import type { FeatureKey } from "@/lib/permissions/feature-keys";
 import type { Session } from "@supabase/supabase-js";
+import { getSessionId, isReplacedSession } from "@/lib/session-id";
 
 export interface FeatureAccessInfo {
   enabled: boolean;
@@ -26,6 +27,13 @@ export interface FeatureCheckResult {
   reason?: FeatureBlockReason;
 }
 
+interface StaffSessionRow {
+  organization_id: string;
+  is_active: boolean;
+  deleted_at: string | null;
+  current_session_id: string | null;
+}
+
 interface EffectiveAccessRow {
   enabled: boolean;
   limit_value: number | null;
@@ -38,7 +46,8 @@ interface EffectiveAccessRow {
 // in AGENTS.md; if every attempt still fails, the caller treats it as
 // "check_failed" and blocks the action (fail closed, never fail open).
 async function withRetry<T>(
-  fn: () => Promise<{ data: T | null; error: { message: string } | null }>,
+  // PromiseLike, not Promise: Supabase query builders are awaitable thenables.
+  fn: () => PromiseLike<{ data: T | null; error: { message: string } | null }>,
   attempts = 2
 ): Promise<{ data: T | null; error: { message: string } | null }> {
   let last: { data: T | null; error: { message: string } | null } = { data: null, error: { message: "not attempted" } };
@@ -75,15 +84,18 @@ export async function checkFeature(featureKey: FeatureKey): Promise<FeatureCheck
     return { allowed: false, organizationId: null, staffId: null, access: null, reason: "unauthenticated" };
   }
 
-  const { data: staff, error: staffError } = await withRetry<{ organization_id: string; is_active: boolean; deleted_at: string | null }>(() =>
+  const { data: staff, error: staffError } = await withRetry<StaffSessionRow>(() =>
     supabase
       .from("staff")
-      .select("organization_id, is_active, deleted_at")
+      .select("organization_id, is_active, deleted_at, current_session_id")
       .eq("id", user.id)
       .maybeSingle()
   );
   if (staffError) {
     return { allowed: false, organizationId: null, staffId: user.id, access: null, reason: "check_failed" };
+  }
+  if (staff && isReplacedSession(staff.current_session_id, getSessionId(sessionData?.session?.access_token))) {
+    return { allowed: false, organizationId: null, staffId: user.id, access: null, reason: "unauthenticated" };
   }
 
   if (!staff || !staff.is_active || staff.deleted_at || !staff.organization_id) {
@@ -183,15 +195,18 @@ export async function requireSeatAvailable(
     return { ok: false, response: NextResponse.json({ error: "Not signed in" }, { status: 401 }) };
   }
 
-  const { data: staff, error: staffError } = await withRetry<{ organization_id: string; is_active: boolean; deleted_at: string | null }>(() =>
+  const { data: staff, error: staffError } = await withRetry<StaffSessionRow>(() =>
     supabase
       .from("staff")
-      .select("organization_id, is_active, deleted_at")
+      .select("organization_id, is_active, deleted_at, current_session_id")
       .eq("id", user.id)
       .maybeSingle()
   );
   if (staffError) {
     return { ok: false, response: NextResponse.json({ error: "Could not verify your account -- please try again" }, { status: 503 }) };
+  }
+  if (staff && isReplacedSession(staff.current_session_id, getSessionId(sessionData?.session?.access_token))) {
+    return { ok: false, response: NextResponse.json({ error: "Signed in on another device" }, { status: 401 }) };
   }
   if (!staff || !staff.is_active || staff.deleted_at || !staff.organization_id) {
     return {

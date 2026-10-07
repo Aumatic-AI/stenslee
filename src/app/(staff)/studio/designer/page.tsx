@@ -288,16 +288,9 @@ export default function DesignerDashboard() {
     <main className="min-h-[100dvh] bg-bg flex flex-col">
       {/* Header */}
       <header className="px-4 sm:px-6 pt-5 pb-4 border-b border-cleo-border flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 relative flex-shrink-0">
-            <Image src="/cleopatra-logo.svg" alt="Cleopatra" fill className="object-contain" />
-          </div>
-          <div>
-            <p className="font-cinzel text-[11px] font-bold tracking-[0.15em] text-gold uppercase leading-none">
-              Cleopatra Ink
-            </p>
-            <p className="text-[10px] font-mono text-muted tracking-wider leading-none mt-0.5">Designer Portal</p>
-          </div>
+        <div className="flex flex-col gap-1.5">
+          <Image src="/stenslee-logo.png" alt="Stenslee" width={886} height={167} className="h-6 w-auto self-start" />
+          <p className="text-[10px] font-mono text-muted tracking-wider leading-none">Designer Portal</p>
         </div>
 
         <div className="flex items-center gap-3">

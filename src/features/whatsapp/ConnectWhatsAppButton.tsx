@@ -9,7 +9,12 @@ declare global {
       init: (opts: { appId: string; xfbml: boolean; version: string }) => void;
       login: (
         callback: (response: { authResponse?: { code?: string } }) => void,
-        opts: { config_id: string; response_type: string; override_default_response_type: boolean; extras: { setup: Record<string, never> } }
+        opts: {
+          config_id: string;
+          response_type: string;
+          override_default_response_type: boolean;
+          extras: { version: string; setup: Record<string, never>; featureType: string; sessionInfoVersion: string };
+        }
       ) => void;
     };
     fbAsyncInit?: () => void;
@@ -18,7 +23,8 @@ declare global {
 
 interface EmbeddedSignupData {
   wabaId: string;
-  phoneNumberId: string;
+  phoneNumberId?: string;
+  coexistence: boolean;
 }
 
 let sdkLoadStarted = false;
@@ -49,10 +55,7 @@ export default function ConnectWhatsAppButton({ onConnected }: { onConnected: ()
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState("");
 
-  // Embedded Signup hands the wabaId/phoneNumberId via a window `message`
-  // event and the one-time code via FB.login's own callback -- the two can
-  // arrive in either order, so both are stashed here and we finish connecting
-  // once both are in.
+  // The finish event and FB.login's code can arrive in either order; connect once both are in.
   const signupDataRef = useRef<EmbeddedSignupData | null>(null);
   const codeRef = useRef<string | null>(null);
 
@@ -68,8 +71,13 @@ export default function ConnectWhatsAppButton({ onConnected }: { onConnected: ()
         return;
       }
       if (data.type !== "WA_EMBEDDED_SIGNUP") return;
-      if (data.event === "FINISH" && data.data?.waba_id && data.data?.phone_number_id) {
-        signupDataRef.current = { wabaId: data.data.waba_id, phoneNumberId: data.data.phone_number_id };
+      // Coexistence (WhatsApp Business app number) finishes with only the WABA id.
+      if (data.event === "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING" && data.data?.waba_id) {
+        signupDataRef.current = { wabaId: data.data.waba_id, coexistence: true };
+        checkBothReady();
+      }
+      if (data.event === "FINISH" && data.data?.waba_id) {
+        signupDataRef.current = { wabaId: data.data.waba_id, phoneNumberId: data.data.phone_number_id, coexistence: false };
         checkBothReady();
       }
       if (data.event === "CANCEL") {
@@ -91,6 +99,7 @@ export default function ConnectWhatsAppButton({ onConnected }: { onConnected: ()
           code: codeRef.current,
           wabaId: signupDataRef.current.wabaId,
           phoneNumberId: signupDataRef.current.phoneNumberId,
+          coexistence: signupDataRef.current.coexistence,
         }),
       });
       const body = await res.json();
@@ -124,7 +133,8 @@ export default function ConnectWhatsAppButton({ onConnected }: { onConnected: ()
         config_id: process.env.NEXT_PUBLIC_META_EMBEDDED_SIGNUP_CONFIG_ID!,
         response_type: "code",
         override_default_response_type: true,
-        extras: { setup: {} },
+        // Coexistence: the studio keeps using its WhatsApp Business app; we only send templates.
+        extras: { version: "v3", setup: {}, featureType: "whatsapp_business_app_onboarding", sessionInfoVersion: "3" },
       }
     );
   }

@@ -1,5 +1,5 @@
 // ============================================================
-// CLEOPATRA INK STUDIO — Rework (Cover-Up / Extend) Prompts
+// STENSLEE STUDIO — Rework (Cover-Up / Extend) Prompts
 // Kept deliberately minimal: over-specifying constraints (mode explanations,
 // DO/DON'T lists, "don't add a white background" type lines) measurably
 // made results worse — the model followed a short, direct instruction on

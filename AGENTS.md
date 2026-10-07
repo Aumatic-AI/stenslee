@@ -1,4 +1,4 @@
-# Cleopatra Ink Studio — Agent Reference
+# Stenslee Studio — Agent Reference
 
 Technical reference for coding agents working in this repo. For a plain-language
 description of what the product does, see `docs/PROJECT_SCOPE.md` instead —

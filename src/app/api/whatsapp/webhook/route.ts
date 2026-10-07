@@ -30,12 +30,7 @@ interface StatusEntry {
   recipient_id?: string;
 }
 
-// POST — the only field we're subscribed to is `messages`. Coexistence
-// delivers both message status updates (statuses[]) AND the customer's
-// inbound replies (messages[]) on this same field, since the phone app and
-// Cloud API share one account. We only ever read `statuses` — any inbound
-// `messages[]` entry is intentionally ignored and never persisted (see
-// TEMP_WHATSAPP.md section 1: no inbox, no message history in our app).
+// POST — only send statuses are read; replies, history, contact sync and echoes are acknowledged and dropped.
 export async function POST(req: NextRequest) {
   const rawBody = await req.text();
   if (!isValidSignature(rawBody, req.headers.get("x-hub-signature-256"))) {

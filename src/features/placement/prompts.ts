@@ -1,5 +1,5 @@
 // ============================================================
-// CLEOPATRA INK STUDIO — Placement Prompts (minimal test version)
+// STENSLEE STUDIO — Placement Prompts (minimal test version)
 // Same lesson learned in prompts-rework.ts: long constraint lists and
 // ALL-CAPS "critical" blocks measurably made results worse — a short,
 // direct instruction got better fidelity from the image model. This file
