@@ -8,8 +8,9 @@ import { getSessionId, isReplacedSession } from "@/lib/session-id";
 
 // Logs this device out as soon as the same account signs in on another device.
 export default function SingleSessionGuard() {
-  // Off on the login page, where a fresh login hasn't claimed its session yet.
-  const active = usePathname() !== "/studio/login";
+  // Off on login/signup, where a fresh login hasn't claimed its session yet.
+  const pathname = usePathname();
+  const active = pathname !== "/studio/login" && pathname !== "/studio/signup";
 
   useEffect(() => {
     if (!active) return;

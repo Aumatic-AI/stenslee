@@ -1,18 +1,14 @@
 "use client";
 
 import { Suspense, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { motion } from "framer-motion";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
-import {
-  DEFAULT_COUNTRY_CODE,
-  isValidPhone,
-  combinePhone,
-  sanitizeCountryCodeInput,
-  sanitizePhoneNumberInput,
-} from "@/lib/phone";
+import { DEFAULT_COUNTRY_CODE, isValidPhone, combinePhone } from "@/lib/phone";
 import OtpInput from "@/components/ui/OtpInput";
+import PhoneInput from "@/components/ui/PhoneInput";
 import { useResendCooldown } from "@/lib/use-resend-cooldown";
 
 const NOT_REGISTERED = "This number isn't registered. Ask your studio admin to add you.";
@@ -151,25 +147,12 @@ function LoginForm() {
         <form onSubmit={handleSendCode} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-mono tracking-[0.15em] uppercase text-muted">Phone Number</label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                inputMode="tel"
-                autoComplete="tel-country-code"
-                value={countryCode}
-                onChange={(e) => { setCountryCode(sanitizeCountryCodeInput(e.target.value)); setError(""); }}
-                className="w-16 bg-surface border border-cleo-border rounded-xl px-3 py-3.5 text-ink text-base text-center focus:outline-none focus:border-gold transition-colors"
-              />
-              <input
-                type="text"
-                inputMode="numeric"
-                autoComplete="tel-national"
-                placeholder="98765 43210"
-                value={phoneNumber}
-                onChange={(e) => { setPhoneNumber(sanitizePhoneNumberInput(e.target.value)); setError(""); }}
-                className="flex-1 bg-surface border border-cleo-border rounded-xl px-4 py-3.5 text-ink text-base placeholder:text-muted/50 focus:outline-none focus:border-gold transition-colors"
-              />
-            </div>
+            <PhoneInput
+              countryCode={countryCode}
+              phoneNumber={phoneNumber}
+              onCountryCodeChange={(code) => { setCountryCode(code); setError(""); }}
+              onPhoneNumberChange={(number) => { setPhoneNumber(number); setError(""); }}
+            />
           </div>
 
           {error && (
@@ -223,6 +206,13 @@ function LoginForm() {
           </div>
         </form>
       )}
+
+      <p className="text-center text-muted text-xs font-mono">
+        New here?{" "}
+        <Link href="/studio/signup" className="text-gold hover:text-gold-light transition-colors">
+          Create your studio
+        </Link>
+      </p>
 
       <p className="text-center text-muted text-[10px] font-mono tracking-widest">
         STENSLEE © 2026

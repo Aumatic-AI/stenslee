@@ -11,7 +11,8 @@ import type { StaffMember } from "@/lib/staff-types";
 import { getStorageUrl } from "@/lib/image-src";
 import { useFeature } from "@/lib/permissions/use-feature";
 import { FeatureLocked } from "@/components/ui/FeatureLocked";
-import { DEFAULT_COUNTRY_CODE, combinePhone, isValidPhone, sanitizeCountryCodeInput, sanitizePhoneNumberInput } from "@/lib/phone";
+import { DEFAULT_COUNTRY_CODE, combinePhone, isValidPhone, sanitizePhoneNumberInput } from "@/lib/phone";
+import PhoneInput, { PANEL_FIELD_CLASS } from "@/components/ui/PhoneInput";
 import OtpInput from "@/components/ui/OtpInput";
 import { useResendCooldown } from "@/lib/use-resend-cooldown";
 
@@ -453,24 +454,13 @@ export default function DesignerDashboard() {
                   onChange={(e) => setName(e.target.value)}
                   className="bg-bg border border-cleo-border rounded-xl px-4 py-3 text-ink text-base placeholder:text-muted/40 focus:outline-none focus:border-gold transition-colors"
                 />
-                <div className="flex gap-2">
-                  <input
-                    type="tel"
-                    inputMode="tel"
-                    placeholder="+91"
-                    value={newCountryCode}
-                    onChange={(e) => setNewCountryCode(sanitizeCountryCodeInput(e.target.value))}
-                    className="w-20 flex-shrink-0 bg-bg border border-cleo-border rounded-xl px-3 py-3 text-ink font-mono text-base text-center placeholder:text-muted/40 focus:outline-none focus:border-gold transition-colors"
-                  />
-                  <input
-                    type="tel"
-                    inputMode="numeric"
-                    placeholder="98765 43210"
-                    value={newPhoneNumber}
-                    onChange={(e) => setNewPhoneNumber(sanitizePhoneNumberInput(e.target.value))}
-                    className="flex-1 min-w-0 bg-bg border border-cleo-border rounded-xl px-4 py-3 text-ink font-mono text-base placeholder:text-muted/40 focus:outline-none focus:border-gold transition-colors"
-                  />
-                </div>
+                <PhoneInput
+                  countryCode={newCountryCode}
+                  phoneNumber={newPhoneNumber}
+                  onCountryCodeChange={setNewCountryCode}
+                  onPhoneNumberChange={setNewPhoneNumber}
+                  fieldClassName={PANEL_FIELD_CLASS}
+                />
                 {startError && <p className="text-error text-xs">{startError}</p>}
                 <button
                   type="submit"

@@ -3,6 +3,7 @@ import { createSupabaseServerClient, createServiceClient } from "@/lib/supabase-
 import { uploadBase64 } from "@/lib/storage";
 import { requireSeatAvailable } from "@/lib/permissions/require-feature";
 import { isValidPhone, combinePhone } from "@/lib/phone";
+import { findStaffByPhone, createOrReuseAuthUser, type StaffByPhone } from "@/lib/staff-phone";
 
 // POST /api/studio/designers — create a new designer (admin only)
 export async function POST(req: NextRequest) {
@@ -11,40 +12,70 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const service = createServiceClient();
-  const { data: requester } = await service.from("staff").select("role").eq("id", user.id).maybeSingle();
+  const { data: requester } = await service.from("staff").select("role, organization_id").eq("id", user.id).maybeSingle();
   if (requester?.role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  const { name, phoneCountryCode, phoneNumber } = await req.json();
+  if (!name?.trim() || !isValidPhone(phoneCountryCode, phoneNumber)) {
+    return NextResponse.json({ error: "name and a valid phone number are required" }, { status: 400 });
+  }
+  const phone = combinePhone(phoneCountryCode, phoneNumber);
+
+  let existing: StaffByPhone | null;
+  try {
+    existing = await findStaffByPhone(service, phone);
+  } catch {
+    return NextResponse.json({ error: "Couldn't check this number. Please try again." }, { status: 500 });
+  }
+
+  // Never say which studio: the other studio's team is private.
+  if (existing && existing.organization_id !== requester.organization_id) {
+    return NextResponse.json(
+      { error: "This number is already registered with another studio on Stenslee. A number can only be in one studio for now, so please use a different number.", code: "in_other_studio" },
+      { status: 409 }
+    );
+  }
+  if (existing && !existing.deleted_at) {
+    const error = existing.is_active
+      ? `This number is already on your team${existing.role === "admin" ? " as an admin" : ""}.`
+      : "This designer is already in your studio but deactivated. Turn them back on from the Designers list.";
+    return NextResponse.json({ error, code: "already_in_studio" }, { status: 409 });
+  }
 
   // Server-side seat-limit gate — live headcount against the plan, not a
   // usage-log check (see requireSeatAvailable's own comment for why).
   const seatCheck = await requireSeatAvailable("designer");
   if (!seatCheck.ok) return seatCheck.response;
 
-  const { name, phoneCountryCode, phoneNumber } = await req.json();
-  if (!name?.trim() || !isValidPhone(phoneCountryCode, phoneNumber)) {
-    return NextResponse.json({ error: "name and a valid phone number are required" }, { status: 400 });
+  // A designer removed from this studio earlier comes back with their history.
+  if (existing) {
+    const { data: restored, error: restoreError } = await service
+      .from("staff")
+      .update({ deleted_at: null, is_active: true, name: name.trim() })
+      .eq("id", existing.id)
+      .select()
+      .single();
+    if (restoreError) return NextResponse.json({ error: restoreError.message }, { status: 500 });
+    return NextResponse.json({ staff: restored, restored: true }, { status: 200 });
   }
 
-  // Create auth user via Supabase Admin API — phone_confirm skips OTP
-  // verification since an admin is vouching for this number, not the
-  // designer verifying it themselves.
-  const { data: authData, error: authError } = await service.auth.admin.createUser({
-    phone: combinePhone(phoneCountryCode, phoneNumber),
-    phone_confirm: true,
-  });
-
-  if (authError || !authData.user) {
-    return NextResponse.json({ error: authError?.message ?? "Failed to create user" }, { status: 500 });
+  // phone_confirm skips OTP verification: the admin is vouching for this number.
+  let authUser: { id: string; created: boolean };
+  try {
+    authUser = await createOrReuseAuthUser(service, phone);
+  } catch (err) {
+    return NextResponse.json({ error: (err as Error).message || "Failed to create user" }, { status: 500 });
   }
 
   // Insert staff row — joins the same organization as the admin creating them.
   const { data: staffRow, error: staffError } = await service
     .from("staff")
     .insert({
-      id: authData.user.id,
+      id: authUser.id,
       organization_id: seatCheck.organizationId,
       phone_country_code: phoneCountryCode,
       phone_number: phoneNumber,
-      name,
+      name: name.trim(),
       role: "designer",
       is_active: true,
     })
@@ -52,8 +83,8 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (staffError) {
-    // Roll back auth user
-    await service.auth.admin.deleteUser(authData.user.id);
+    // Roll back only a login we just created, never a reused one.
+    if (authUser.created) await service.auth.admin.deleteUser(authUser.id);
     return NextResponse.json({ error: staffError.message }, { status: 500 });
   }
 

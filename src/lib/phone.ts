@@ -5,8 +5,9 @@
 // string is unreliable. See customers.phone's comment in supabase-schema.sql.
 export const DEFAULT_COUNTRY_CODE = "+91";
 
+// Up to 4 digits: countries-list gives some codes with their area code included (e.g. Jamaica +1876).
 export function isValidCountryCode(code: string): boolean {
-  return /^\+[1-9]\d{0,2}$/.test(code);
+  return /^\+[1-9]\d{0,3}$/.test(code);
 }
 
 // India (+91) mobile numbers are always exactly 10 digits. Everywhere else,
@@ -18,17 +19,17 @@ export function isValidPhoneNumber(countryCode: string, number: string): boolean
   return number.length >= 4 && number.length <= 14;
 }
 
+// E.164 caps the full number (code + national number) at 15 digits.
 export function isValidPhone(countryCode: string, number: string): boolean {
-  return isValidCountryCode(countryCode) && isValidPhoneNumber(countryCode, number);
+  return (
+    isValidCountryCode(countryCode) &&
+    isValidPhoneNumber(countryCode, number) &&
+    countryCode.length - 1 + number.length <= 15
+  );
 }
 
 export function combinePhone(countryCode: string, number: string): string {
   return `${countryCode}${number}`;
-}
-
-export function sanitizeCountryCodeInput(value: string): string {
-  const digits = value.replace(/\D/g, "").slice(0, 3);
-  return digits ? `+${digits}` : "";
 }
 
 export function sanitizePhoneNumberInput(value: string): string {

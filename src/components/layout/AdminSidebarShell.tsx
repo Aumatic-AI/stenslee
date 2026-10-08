@@ -6,7 +6,10 @@ import Image from "next/image";
 import { motion } from "framer-motion";
 import { usePathname, useRouter } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
-import { getStorageUrl } from "@/lib/image-src";
+import { upgradeWhatsAppUrl } from "@/lib/upgrade";
+import AccountMenu from "./AccountMenu";
+import UpgradeBanner from "./UpgradeBanner";
+import { CrownIcon } from "./UpgradeIcons";
 
 interface AdminIdentity {
   name: string;
@@ -130,6 +133,8 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
   const [admin, setAdmin] = useState<AdminIdentity | null | undefined>(undefined);
   const [trashCount, setTrashCount] = useState(0);
   const [credits, setCredits] = useState<{ remaining: number; total: number } | null>(null);
+  const [studioName, setStudioName] = useState<string | null>(null);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
 
   // Unseen-count badge for Recently Deleted — re-fetched on every navigation
   // (not just once at mount) so it clears once the admin has actually opened
@@ -154,9 +159,7 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [admin, pathname]);
 
-  // AI credits balance for the sidebar widget -- fetched once per admin
-  // session (credits don't change from in-app navigation, only from
-  // generating images or a Super Admin edit, so no pathname dependency).
+  // AI credits for the sidebar widget and the out-of-credits banner; refreshed on navigation so the banner shows promptly.
   useEffect(() => {
     if (!admin) return;
     let cancelled = false;
@@ -168,7 +171,7 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
       if (!staffRow?.organization_id) return;
 
       const { data: org } = await supabase
-        .from("organizations").select("ai_credits_remaining, plan_id").eq("id", staffRow.organization_id).maybeSingle();
+        .from("organizations").select("name, ai_credits_remaining, plan_id").eq("id", staffRow.organization_id).maybeSingle();
       if (!org) return;
 
       let total = org.ai_credits_remaining;
@@ -178,11 +181,14 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
         if (plan) total = plan.ai_credits_included;
       }
 
-      if (!cancelled) setCredits({ remaining: org.ai_credits_remaining, total });
+      if (!cancelled) {
+        setCredits({ remaining: org.ai_credits_remaining, total });
+        setStudioName(org.name);
+      }
     })();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [admin]);
+  }, [admin, pathname]);
 
   useEffect(() => {
     // Runs even on the login pathname now -- skipping it there used to skip
@@ -317,146 +323,150 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
   // fixed bar there would overlap it.
   const isAdminSection = pathname.startsWith("/studio/admin");
 
+  const showUpgradeBanner = !!credits && credits.remaining <= 0 && !bannerDismissed;
+
   return (
-    <div className="h-[100dvh] min-h-0 bg-bg flex flex-col lg:flex-row overflow-hidden">
-      {/* Sidebar — only on genuinely wide (desktop) viewports. Narrower ones
-          (phone through tablet/split-screen) get the compact top tab bar
-          below instead — a fixed 224px rail left too little room for the
-          dashboard's content at those widths. Fixed in place; only <main> scrolls. */}
-      <aside className="hidden lg:flex lg:flex-col w-64 flex-shrink-0 min-h-0 border-r border-cleo-border bg-surface/40 px-4 py-6 gap-6 overflow-y-auto">
-        <div className="flex flex-col gap-1.5 px-2">
-          <Image src="/stenslee-logo.png" alt="Stenslee" width={886} height={167} className="h-6 w-auto self-start" />
-          <p className="text-[10px] font-mono text-muted tracking-wider leading-none">Admin Portal</p>
-        </div>
+    <div className="h-[100dvh] min-h-0 bg-bg flex flex-col overflow-hidden">
+      {showUpgradeBanner && <UpgradeBanner studioName={studioName} onDismiss={() => setBannerDismissed(true)} />}
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
+        {/* Sidebar — only on genuinely wide (desktop) viewports. Narrower ones
+            (phone through tablet/split-screen) get the compact top tab bar
+            below instead — a fixed 224px rail left too little room for the
+            dashboard's content at those widths. Fixed in place; only <main> scrolls. */}
+        <aside className="hidden lg:flex lg:flex-col w-64 flex-shrink-0 min-h-0 border-r border-cleo-border bg-surface/40 px-4 py-6 gap-6 overflow-y-auto">
+          <div className="flex flex-col gap-1.5 px-2">
+            <Image src="/stenslee-logo.png" alt="Stenslee" width={886} height={167} className="h-6 w-auto self-start" />
+            <p className="text-[10px] font-mono text-muted tracking-wider leading-none">Admin Portal</p>
+          </div>
 
-        <nav className="flex flex-col gap-1">
-          {ALL_NAV_ITEMS.map((item) => {
-            const active = isActive(pathname, item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-cinzel font-bold tracking-wide transition-colors border ${
-                  active
-                    ? "bg-gold/10 text-gold border-gold/30"
-                    : "text-muted hover:text-ink hover:bg-surface border-transparent"
-                }`}
-              >
-                {item.icon}
-                <span className="flex-1 whitespace-nowrap">{item.label}</span>
-                {item.href === TRASH_HREF && <NavBadge count={trashCount} />}
-              </Link>
-            );
-          })}
-        </nav>
+          <nav className="flex flex-col gap-1">
+            {ALL_NAV_ITEMS.map((item) => {
+              const active = isActive(pathname, item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-cinzel font-bold tracking-wide transition-colors border ${
+                    active
+                      ? "bg-gold/10 text-gold border-gold/30"
+                      : "text-muted hover:text-ink hover:bg-surface border-transparent"
+                  }`}
+                >
+                  {item.icon}
+                  <span className="flex-1 whitespace-nowrap">{item.label}</span>
+                  {item.href === TRASH_HREF && <NavBadge count={trashCount} />}
+                </Link>
+              );
+            })}
+          </nav>
 
-        <div className="mt-auto flex flex-col gap-3">
-          <Link href="/studio/admin/settings" className="flex items-center gap-2.5 px-2 group">
-            <div className="relative w-8 h-8 rounded-full bg-gold/10 border border-gold/30 flex items-center justify-center overflow-hidden flex-shrink-0">
-              {admin.avatar_key ? (
-                <Image src={getStorageUrl(admin.avatar_key)!} alt={admin.name} fill unoptimized className="object-cover" />
-              ) : (
-                <span className="font-cinzel text-xs font-black text-gold">{admin.name.charAt(0).toUpperCase()}</span>
-              )}
-            </div>
-            <div className="min-w-0">
-              <p className="text-ink text-xs font-semibold truncate group-hover:text-gold transition-colors">{admin.name}</p>
-              <p className="text-muted text-[9px] font-mono uppercase tracking-wider">Admin</p>
-            </div>
-          </Link>
+          <div className="mt-auto flex flex-col gap-3">
+            <AccountMenu name={admin.name} avatarKey={admin.avatar_key} studioName={studioName} />
 
-          {credits && (
-            <div className="px-2">
-              <div className="bg-surface border border-cleo-border rounded-xl px-3 py-2.5 flex flex-col gap-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-[9px] font-mono uppercase tracking-wider text-muted">AI Credits</span>
-                  <span className={`text-[10px] font-mono font-bold ${creditsLow ? "text-error" : "text-gold"}`}>
-                    {credits.remaining.toLocaleString()} left
-                  </span>
-                </div>
-                <div className="h-1.5 rounded-full bg-surface-2 overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all ${creditsLow ? "bg-error" : "bg-gold"}`}
-                    style={{ width: `${creditsPct}%` }}
-                  />
-                </div>
-                <p className="text-muted text-[9px] font-mono">
-                  {creditsUsed.toLocaleString()} used · {credits.total.toLocaleString()} total
-                </p>
-              </div>
-            </div>
-          )}
-
-          <button
-            onClick={handleLogout}
-            className="text-muted hover:text-error transition-colors text-xs font-mono tracking-wider px-3 py-2 rounded-lg border border-cleo-border hover:border-error/40 cursor-pointer text-left"
-          >
-            Logout
-          </button>
-        </div>
-      </aside>
-
-      {/* Top tab bar — phone through tablet/split-screen widths */}
-      <div className="lg:hidden border-b border-cleo-border bg-surface/40 flex-shrink-0">
-        <div className="flex items-center justify-between px-4 pt-4 pb-2">
-          <Image src="/stenslee-logo.png" alt="Stenslee" width={886} height={167} className="h-5 w-auto" />
-          <button
-            onClick={handleLogout}
-            className="text-muted hover:text-error transition-colors text-[10px] font-mono tracking-wider px-2.5 py-1.5 rounded-lg border border-cleo-border cursor-pointer"
-          >
-            Logout
-          </button>
-        </div>
-        {/* On phone widths, admin-section pages use the bottom tab bar
-            instead — this strip only shows there from tablet width up. */}
-        <nav className={`${isAdminSection ? "hidden sm:flex" : "flex"} gap-1.5 px-3 pb-3 overflow-x-auto`}>
-          {ALL_NAV_ITEMS.map((item) => {
-            const active = isActive(pathname, item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-cinzel font-bold uppercase tracking-wider transition-colors ${
-                  active ? "bg-gold text-bg" : "text-muted border border-cleo-border"
-                }`}
-              >
-                {item.icon}
-                {item.label}
-                {item.href === TRASH_HREF && <NavBadge count={trashCount} />}
-              </Link>
-            );
-          })}
-        </nav>
-      </div>
-
-      {/* Page content */}
-      <main className={`flex-1 min-w-0 min-h-0 flex flex-col overflow-y-auto ${isAdminSection ? "pb-20 sm:pb-0" : ""}`}>{children}</main>
-
-      {/* Bottom tab bar — mobile-app style, phone widths, admin section only */}
-      {isAdminSection && (
-        <nav className="sm:hidden fixed bottom-0 inset-x-0 z-30 bg-surface/95 backdrop-blur-md border-t border-cleo-border flex items-stretch pb-safe">
-          {ALL_NAV_ITEMS.map((item) => {
-            const active = isActive(pathname, item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`flex-1 flex flex-col items-center justify-center gap-1 py-2.5 transition-colors ${active ? "text-gold" : "text-muted"}`}
-              >
-                <span className="relative">
-                  {cloneElement(item.icon, { className: "w-5 h-5" })}
-                  {item.href === TRASH_HREF && trashCount > 0 && (
-                    <span className="absolute -top-1.5 -right-2 min-w-[0.9rem] h-[0.9rem] px-0.5 rounded-full bg-gold text-bg text-[8px] font-mono font-bold flex items-center justify-center leading-none">
-                      {trashCount > 99 ? "99+" : trashCount}
+            {credits && (
+              <div className="px-2">
+                <div className="bg-surface border border-cleo-border rounded-xl px-3 py-2.5 flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-mono uppercase tracking-wider text-muted">AI Credits</span>
+                    <span className={`text-[10px] font-mono font-bold ${creditsLow ? "text-error" : "text-gold"}`}>
+                      {credits.remaining.toLocaleString()} left
                     </span>
-                  )}
-                </span>
-                <span className="text-[9px] font-cinzel font-bold uppercase tracking-wide">{item.label}</span>
-              </Link>
-            );
-          })}
-        </nav>
-      )}
+                  </div>
+                  <div className="h-1.5 rounded-full bg-surface-2 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${creditsLow ? "bg-error" : "bg-gold"}`}
+                      style={{ width: `${creditsPct}%` }}
+                    />
+                  </div>
+                  <p className="text-muted text-[9px] font-mono">
+                    {creditsUsed.toLocaleString()} used · {credits.total.toLocaleString()} total
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={handleLogout}
+              className="text-muted hover:text-error transition-colors text-xs font-mono tracking-wider px-3 py-2 rounded-lg border border-cleo-border hover:border-error/40 cursor-pointer text-left"
+            >
+              Logout
+            </button>
+          </div>
+        </aside>
+
+        {/* Top tab bar — phone through tablet/split-screen widths */}
+        <div className="lg:hidden border-b border-cleo-border bg-surface/40 flex-shrink-0">
+          <div className="flex items-center justify-between px-4 pt-4 pb-2">
+            <Image src="/stenslee-logo.png" alt="Stenslee" width={886} height={167} className="h-5 w-auto" />
+            <div className="flex items-center gap-2">
+              <a
+                href={upgradeWhatsAppUrl(studioName)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 text-gold text-[10px] font-mono tracking-wider px-2.5 py-1.5 rounded-lg border border-gold/40 bg-gold/10"
+              >
+                <CrownIcon className="w-3.5 h-3.5" />
+                Upgrade
+              </a>
+              <button
+                onClick={handleLogout}
+                className="text-muted hover:text-error transition-colors text-[10px] font-mono tracking-wider px-2.5 py-1.5 rounded-lg border border-cleo-border cursor-pointer"
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+          {/* On phone widths, admin-section pages use the bottom tab bar
+              instead — this strip only shows there from tablet width up. */}
+          <nav className={`${isAdminSection ? "hidden sm:flex" : "flex"} gap-1.5 px-3 pb-3 overflow-x-auto`}>
+            {ALL_NAV_ITEMS.map((item) => {
+              const active = isActive(pathname, item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-cinzel font-bold uppercase tracking-wider transition-colors ${
+                    active ? "bg-gold text-bg" : "text-muted border border-cleo-border"
+                  }`}
+                >
+                  {item.icon}
+                  {item.label}
+                  {item.href === TRASH_HREF && <NavBadge count={trashCount} />}
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
+
+        {/* Page content */}
+        <main className={`flex-1 min-w-0 min-h-0 flex flex-col overflow-y-auto ${isAdminSection ? "pb-20 sm:pb-0" : ""}`}>{children}</main>
+
+        {/* Bottom tab bar — mobile-app style, phone widths, admin section only */}
+        {isAdminSection && (
+          <nav className="sm:hidden fixed bottom-0 inset-x-0 z-30 bg-surface/95 backdrop-blur-md border-t border-cleo-border flex items-stretch pb-safe">
+            {ALL_NAV_ITEMS.map((item) => {
+              const active = isActive(pathname, item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`flex-1 flex flex-col items-center justify-center gap-1 py-2.5 transition-colors ${active ? "text-gold" : "text-muted"}`}
+                >
+                  <span className="relative">
+                    {cloneElement(item.icon, { className: "w-5 h-5" })}
+                    {item.href === TRASH_HREF && trashCount > 0 && (
+                      <span className="absolute -top-1.5 -right-2 min-w-[0.9rem] h-[0.9rem] px-0.5 rounded-full bg-gold text-bg text-[8px] font-mono font-bold flex items-center justify-center leading-none">
+                        {trashCount > 99 ? "99+" : trashCount}
+                      </span>
+                    )}
+                  </span>
+                  <span className="text-[9px] font-cinzel font-bold uppercase tracking-wide">{item.label}</span>
+                </Link>
+              );
+            })}
+          </nav>
+        )}
+      </div>
     </div>
   );
 }

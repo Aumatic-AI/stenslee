@@ -4,7 +4,8 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 import { usePermissionStore } from "@/store/permission-store";
-import { DEFAULT_COUNTRY_CODE, combinePhone, isValidPhone, sanitizeCountryCodeInput, sanitizePhoneNumberInput } from "@/lib/phone";
+import { DEFAULT_COUNTRY_CODE, combinePhone, isValidPhone } from "@/lib/phone";
+import PhoneInput, { PANEL_FIELD_CLASS } from "@/components/ui/PhoneInput";
 import OtpInput from "@/components/ui/OtpInput";
 import { useResendCooldown } from "@/lib/use-resend-cooldown";
 
@@ -166,24 +167,13 @@ export default function AddCustomerModal({ onClose, onCreated }: Props) {
             onChange={(e) => setName(e.target.value)}
             className="bg-bg border border-cleo-border rounded-xl px-4 py-3 text-ink text-base placeholder:text-muted/40 focus:outline-none focus:border-gold transition-colors"
           />
-          <div className="flex gap-2">
-            <input
-              type="tel"
-              inputMode="tel"
-              placeholder="+91"
-              value={countryCode}
-              onChange={(e) => setCountryCode(sanitizeCountryCodeInput(e.target.value))}
-              className="w-20 flex-shrink-0 bg-bg border border-cleo-border rounded-xl px-3 py-3 text-ink font-mono text-base text-center placeholder:text-muted/40 focus:outline-none focus:border-gold transition-colors"
-            />
-            <input
-              type="tel"
-              inputMode="numeric"
-              placeholder="98765 43210"
-              value={phoneNumber}
-              onChange={(e) => setPhoneNumber(sanitizePhoneNumberInput(e.target.value))}
-              className="flex-1 min-w-0 bg-bg border border-cleo-border rounded-xl px-4 py-3 text-ink font-mono text-base placeholder:text-muted/40 focus:outline-none focus:border-gold transition-colors"
-            />
-          </div>
+          <PhoneInput
+            countryCode={countryCode}
+            phoneNumber={phoneNumber}
+            onCountryCodeChange={setCountryCode}
+            onPhoneNumberChange={setPhoneNumber}
+            fieldClassName={PANEL_FIELD_CLASS}
+          />
 
           {error && <p className="text-error text-xs">{error}</p>}
 

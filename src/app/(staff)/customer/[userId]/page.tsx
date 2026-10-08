@@ -10,7 +10,8 @@ import { useAppStore } from "@/store/app-store";
 import { resolveBackUrl } from "@/lib/auth-utils";
 import FilterChips from "@/components/ui/FilterChips";
 import { resolveImageSrc } from "@/lib/image-src";
-import { isValidPhone, sanitizeCountryCodeInput, sanitizePhoneNumberInput } from "@/lib/phone";
+import { isValidPhone } from "@/lib/phone";
+import PhoneInput, { PANEL_FIELD_CLASS } from "@/components/ui/PhoneInput";
 
 const supabase = createSupabaseBrowserClient();
 
@@ -409,24 +410,13 @@ function CustomerDashboardInner() {
                 autoFocus
                 className="bg-bg border border-cleo-border rounded-xl px-4 py-3 text-ink text-base placeholder:text-muted/40 focus:outline-none focus:border-gold transition-colors"
               />
-              <div className="flex gap-2">
-                <input
-                  type="tel"
-                  inputMode="tel"
-                  value={editCountryCode}
-                  onChange={(e) => setEditCountryCode(sanitizeCountryCodeInput(e.target.value))}
-                  placeholder="+91"
-                  className="w-20 flex-shrink-0 bg-bg border border-cleo-border rounded-xl px-3 py-3 text-ink font-mono text-base text-center placeholder:text-muted/40 focus:outline-none focus:border-gold transition-colors"
-                />
-                <input
-                  type="tel"
-                  inputMode="numeric"
-                  value={editPhoneNumber}
-                  onChange={(e) => setEditPhoneNumber(sanitizePhoneNumberInput(e.target.value))}
-                  placeholder="98765 43210"
-                  className="flex-1 min-w-0 bg-bg border border-cleo-border rounded-xl px-4 py-3 text-ink font-mono text-base placeholder:text-muted/40 focus:outline-none focus:border-gold transition-colors"
-                />
-              </div>
+              <PhoneInput
+                countryCode={editCountryCode}
+                phoneNumber={editPhoneNumber}
+                onCountryCodeChange={setEditCountryCode}
+                onPhoneNumberChange={setEditPhoneNumber}
+                fieldClassName={PANEL_FIELD_CLASS}
+              />
               {saveError && <p className="text-error text-xs">{saveError}</p>}
               <div className="flex gap-2">
                 <button

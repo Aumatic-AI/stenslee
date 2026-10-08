@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { getClientRole } from "@/lib/auth-utils";
-import { DEFAULT_COUNTRY_CODE, isValidPhone, sanitizeCountryCodeInput, sanitizePhoneNumberInput } from "@/lib/phone";
+import { DEFAULT_COUNTRY_CODE, isValidPhone } from "@/lib/phone";
+import PhoneInput from "@/components/ui/PhoneInput";
 
 export default function NewDesignerPage() {
   const router = useRouter();
@@ -97,27 +98,15 @@ export default function NewDesignerPage() {
 
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-mono tracking-[0.15em] uppercase text-muted">Phone Number</label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  inputMode="tel"
-                  value={phoneCountryCode}
-                  onChange={(e) => { setPhoneCountryCode(sanitizeCountryCodeInput(e.target.value)); setErrors((p) => ({ ...p, phone: "" })); }}
-                  className={`w-16 bg-surface border rounded-xl px-3 py-3.5 text-ink text-base text-center focus:outline-none transition-colors ${
-                    errors.phone ? "border-error" : "border-cleo-border focus:border-gold"
-                  }`}
-                />
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="98765 43210"
-                  value={phoneNumber}
-                  onChange={(e) => { setPhoneNumber(sanitizePhoneNumberInput(e.target.value)); setErrors((p) => ({ ...p, phone: "" })); }}
-                  className={`flex-1 bg-surface border rounded-xl px-4 py-3.5 text-ink text-base placeholder:text-muted/50 focus:outline-none transition-colors ${
-                    errors.phone ? "border-error" : "border-cleo-border focus:border-gold"
-                  }`}
-                />
-              </div>
+              <PhoneInput
+                countryCode={phoneCountryCode}
+                phoneNumber={phoneNumber}
+                onCountryCodeChange={(code) => { setPhoneCountryCode(code); setErrors((p) => ({ ...p, phone: "" })); }}
+                onPhoneNumberChange={(number) => { setPhoneNumber(number); setErrors((p) => ({ ...p, phone: "" })); }}
+                fieldClassName={`bg-surface border rounded-xl py-3.5 text-ink text-base placeholder:text-muted/50 focus:outline-none transition-colors ${
+                  errors.phone ? "border-error" : "border-cleo-border focus:border-gold"
+                }`}
+              />
               {errors.phone && <p className="text-error text-xs font-mono">{errors.phone}</p>}
             </div>
 

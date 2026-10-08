@@ -2,24 +2,30 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "crypto";
 import { sendAuthOtp } from "@/lib/whatsapp/graph";
 import { createServiceClient } from "@/lib/supabase-server";
+import { phoneDigits, signupCutoffIso } from "@/lib/signup";
 
 const NOT_REGISTERED = "This number isn't registered. Ask your admin to add you.";
 
-// Only active staff or platform admins get a login code; fails closed if the lookup errors.
-async function isAllowedToLogIn(userId: string): Promise<"allowed" | "denied" | "check_failed"> {
+// Codes go to active studio staff, or a number that just filled in the signup form; fails closed if the lookup errors.
+async function isAllowedToLogIn(userId: string, phone: string): Promise<"allowed" | "denied" | "check_failed"> {
   const service = createServiceClient();
   const controller = new AbortController();
   // Keeps the hook well inside Supabase's 5s limit even if this lookup stalls.
   const timeout = setTimeout(() => controller.abort(), 2000);
   try {
-    const [staffRes, adminRes] = await Promise.all([
+    const [staffRes, signupRes] = await Promise.all([
       service.from("staff").select("is_active, deleted_at").eq("id", userId).abortSignal(controller.signal).maybeSingle(),
-      service.from("platform_admins").select("is_active").eq("id", userId).abortSignal(controller.signal).maybeSingle(),
+      service
+        .from("signup_requests")
+        .select("phone")
+        .eq("phone", phoneDigits(phone))
+        .gte("created_at", signupCutoffIso())
+        .abortSignal(controller.signal)
+        .maybeSingle(),
     ]);
-    if (staffRes.error || adminRes.error) return "check_failed";
+    if (staffRes.error || signupRes.error) return "check_failed";
     const activeStaff = !!staffRes.data && staffRes.data.is_active && !staffRes.data.deleted_at;
-    const activeAdmin = !!adminRes.data && adminRes.data.is_active;
-    return activeStaff || activeAdmin ? "allowed" : "denied";
+    return activeStaff || !!signupRes.data ? "allowed" : "denied";
   } catch {
     return "check_failed";
   } finally {
@@ -28,8 +34,7 @@ async function isAllowedToLogIn(userId: string): Promise<"allowed" | "denied" | 
 }
 
 // Supabase's Send SMS Hook -- called instead of a built-in SMS provider on
-// every signInWithOtp({ phone }), for BOTH apps (studio + super-admin share
-// one Supabase project, so this one endpoint serves both). Verifies the
+// every signInWithOtp({ phone }) from the studio app. Verifies the
 // request really came from Supabase (Standard Webhooks signing, same scheme
 // Supabase's own docs describe), then relays the code over WhatsApp instead
 // of SMS. Configure the hook URL + secret once in Supabase Dashboard ->
@@ -71,13 +76,13 @@ export async function POST(req: NextRequest) {
   }
 
   // HTTP 200 + error body on purpose: Supabase only passes the message through this way.
-  const access = await isAllowedToLogIn(userId);
+  const access = await isAllowedToLogIn(userId, phone);
   if (access === "denied") {
-    console.warn(`[send-whatsapp-otp] refused: ${phone} is not an active staff member or platform admin`);
+    console.warn(`[send-whatsapp-otp] refused: ${phone} is not an active staff member or pending signup`);
     return NextResponse.json({ error: { http_code: 403, message: NOT_REGISTERED } });
   }
   if (access === "check_failed") {
-    console.error(`[send-whatsapp-otp] refused: could not verify ${phone} against staff/platform_admins`);
+    console.error(`[send-whatsapp-otp] refused: could not verify ${phone} against staff/signups`);
     return NextResponse.json({
       error: { http_code: 503, message: "Couldn't verify this number right now. Please try again." },
     });

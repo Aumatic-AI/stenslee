@@ -18,6 +18,9 @@ const PUBLIC_PREFIXES = [
   "/api/proxy-image",
   "/api/whatsapp/webhook",
   "/api/auth/send-whatsapp-otp",
+  // Self-serve signup: the user has no staff row until /api/signup/complete creates it.
+  "/studio/signup",
+  "/api/signup",
 ];
 
 function makeSupabaseClient(request: NextRequest, response: { current: NextResponse }) {
