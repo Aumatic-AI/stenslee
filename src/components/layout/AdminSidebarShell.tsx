@@ -232,7 +232,7 @@ export default function AdminSidebarShell({ children }: { children: React.ReactN
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (pathname === "/studio/login") {
+  if (pathname === "/studio/login" || pathname === "/studio/signup") {
     return <>{children}</>;
   }
 

@@ -19,9 +19,10 @@ const PUBLIC_PREFIXES = [
   "/api/whatsapp/webhook",
   "/api/auth/send-whatsapp-otp",
   // Self-serve signup: the user has no staff row until /api/signup/complete creates it.
-  "/studio/signup",
   "/api/signup",
 ];
+
+const SIGNUP_PATH = "/studio/signup";
 
 function makeSupabaseClient(request: NextRequest, response: { current: NextResponse }) {
   return createServerClient(
@@ -79,7 +80,7 @@ export async function proxy(request: NextRequest) {
   const { data: { session } } = await supabase.auth.getSession();
 
   if (!session) {
-    if (pathname === "/studio/login") return response.current;
+    if (pathname === "/studio/login" || pathname === SIGNUP_PATH) return response.current;
     const loginUrl = new URL("/studio/login", request.url);
     if (pathname !== "/") loginUrl.searchParams.set("next", pathname);
     return NextResponse.redirect(loginUrl);
@@ -114,6 +115,15 @@ export async function proxy(request: NextRequest) {
   const replaced = known && !!staff && isReplacedSession(staff.current_session_id, getSessionId(session.access_token));
   const valid =
     known && !!staff && staff.is_active && !staff.deleted_at && !isSessionExpired(staff.last_login_at) && !replaced;
+
+  // Logged-in staff go to their dashboard; anyone else, including a signup still mid-verification, sees the form.
+  if (pathname === SIGNUP_PATH) {
+    if (valid) {
+      const dest = staff!.role === "admin" ? "/studio/admin" : "/studio/designer";
+      return NextResponse.redirect(new URL(dest, request.url));
+    }
+    return response.current;
+  }
 
   // ── /studio/login — redirect to dashboard if already valid session ──
   if (pathname === "/studio/login") {
