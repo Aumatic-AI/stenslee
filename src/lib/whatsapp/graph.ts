@@ -10,13 +10,20 @@ export class GraphApiError extends Error {
   }
 }
 
+// Logs only the start and end of a token so logs never hold the full secret.
+export function maskToken(token: string): string {
+  return `${token.slice(0, 8)}…${token.slice(-4)} (${token.length} chars)`;
+}
+
 async function graphFetch(path: string, init: RequestInit & { accessToken: string }) {
   const { accessToken, headers, ...rest } = init;
+  const method = rest.method ?? "GET";
   const res = await fetch(`${GRAPH_BASE}${path}`, {
     ...rest,
     headers: { ...headers, Authorization: `Bearer ${accessToken}` },
   });
   const body = await res.json().catch(() => null);
+  console.log(`[graph] ${method} ${path} -> ${res.status}`, JSON.stringify(body));
   if (!res.ok) {
     const message = (body as { error?: { message?: string } })?.error?.message || `Graph API error (${res.status})`;
     throw new GraphApiError(message, res.status, body);
@@ -38,10 +45,13 @@ export async function exchangeCodeForToken(code: string): Promise<string> {
   const res = await fetch(`${GRAPH_BASE}/oauth/access_token?${params}`);
   const body = await res.json().catch(() => null);
   if (!res.ok || !body?.access_token) {
+    console.error(`[graph] GET /oauth/access_token -> ${res.status} code exchange failed`, JSON.stringify(body));
     const message = body?.error?.message || "Failed to exchange Embedded Signup code for a token";
     throw new GraphApiError(message, res.status, body);
   }
-  return body.access_token as string;
+  const { access_token, ...rest } = body;
+  console.log(`[graph] GET /oauth/access_token -> ${res.status} token ${maskToken(access_token)}`, JSON.stringify(rest));
+  return access_token as string;
 }
 
 // Wires this WABA's events (message status updates) to our app's webhook —

@@ -1,5 +1,4 @@
-// SERVER-ONLY — loads an org's WhatsApp connection (decrypting the stored
-// token) for use by the templates/send/connect API routes.
+// SERVER-ONLY — loads an org's WhatsApp connection for use by the templates/send/connect API routes.
 import { createServiceClient } from "@/lib/supabase-server";
 import { decryptToken } from "@/lib/whatsapp/crypto";
 
@@ -7,6 +6,15 @@ export interface OrgWhatsAppConfig {
   wabaId: string;
   phoneNumberId: string;
   accessToken: string;
+}
+
+// New tokens are saved as plain text for now; ones saved earlier are still encrypted.
+function readStoredToken(stored: string): string {
+  try {
+    return decryptToken(stored);
+  } catch {
+    return stored;
+  }
 }
 
 export async function getOrgWhatsAppConfig(organizationId: string): Promise<OrgWhatsAppConfig | null> {
@@ -24,6 +32,6 @@ export async function getOrgWhatsAppConfig(organizationId: string): Promise<OrgW
   return {
     wabaId: data.whatsapp_waba_id,
     phoneNumberId: data.whatsapp_phone_number_id,
-    accessToken: decryptToken(data.whatsapp_access_token_enc),
+    accessToken: readStoredToken(data.whatsapp_access_token_enc),
   };
 }
