@@ -37,7 +37,7 @@ function loadFacebookSdk(onReady: () => void) {
     window.FB!.init({
       appId: process.env.NEXT_PUBLIC_META_APP_ID!,
       xfbml: true,
-      version: "v26.0",
+      version: "v23.0",
     });
     onReady();
   };
@@ -133,7 +133,7 @@ export default function ConnectWhatsAppButton({ onConnected }: { onConnected: ()
         config_id: process.env.NEXT_PUBLIC_META_EMBEDDED_SIGNUP_CONFIG_ID!,
         response_type: "code",
         override_default_response_type: true,
-        extras: { version: "v4", setup: {}, featureType: "whatsapp_business_app_onboarding", sessionInfoVersion: "4" },
+        extras: { version: "v3", setup: {}, featureType: "whatsapp_business_app_onboarding", sessionInfoVersion: "3" },
       }
     );
   }
