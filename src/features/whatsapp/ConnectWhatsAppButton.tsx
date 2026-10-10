@@ -133,8 +133,7 @@ export default function ConnectWhatsAppButton({ onConnected }: { onConnected: ()
         config_id: process.env.NEXT_PUBLIC_META_EMBEDDED_SIGNUP_CONFIG_ID!,
         response_type: "code",
         override_default_response_type: true,
-        // Coexistence: the studio keeps using its WhatsApp Business app; we only send templates.
-        extras: { version: "v3", setup: {}, featureType: "whatsapp_business_app_onboarding", sessionInfoVersion: "3" },
+        extras: { version: "v4", setup: {}, featureType: "whatsapp_business_app_onboarding", sessionInfoVersion: "4" },
       }
     );
   }

@@ -1,44 +1,22 @@
 # Stenslee Studio
 
-AI-powered tattoo design platform for **in-shop use by staff**. A designer looks up (or creates) a customer by phone, runs the flow — style → generate → refine → placement → finalize — and prints an A4 stencil. Customers never log in; staff act on their behalf.
-
-See [`AGENTS.md`](./AGENTS.md) for the full architecture reference and [`progress.md`](./progress.md) for status.
+The studio dashboard for Stenslee (`dashboard.stenslee.com`). Tattoo studio admins and designers log in with a WhatsApp code to manage customers, create AI tattoo designs, preview them on the customer's body, print stencils, keep a design library and message customers on WhatsApp. Customers never log in.
 
 ## Stack
 
-- **Next.js** (App Router) + TypeScript
-- **Supabase** — Auth (staff), PostgreSQL, Storage (`session-assets`)
-- **KEI API** (`api.kie.ai`) — `gpt-image-2-image-to-image` for design generation, `nano-banana-pro` for the final body-placement render
-- **Tailwind CSS v4** — dark/gold theme, Cinzel font
+- Next.js 16 (App Router) + React 19 + TypeScript, Tailwind CSS v4
+- Supabase — Postgres (multi-studio with RLS), Auth (phone login, codes via WhatsApp), Storage, Realtime
+- KIE.ai (image models), OpenAI (description enhancer), Meta WhatsApp Business Platform
 
-## Getting Started
+## Getting started
 
 ```bash
 npm install
 npm run dev      # http://localhost:3000
 ```
 
-Other scripts:
+Create `.env.local` with the variables listed in the workspace docs (`docs/architecture.md` → Environment variables).
 
-```bash
-npm run build    # production build
-npm run start    # serve the production build
-npm run lint     # eslint
-```
+## Documentation
 
-## Environment Variables
-
-Create `.env.local`:
-
-```
-NEXT_PUBLIC_SUPABASE_URL
-NEXT_PUBLIC_SUPABASE_ANON_KEY
-SUPABASE_SERVICE_ROLE_KEY
-KEI_API_KEY
-CRON_SECRET                  # shared secret for the session-cleanup cron
-PINTEREST_ACCESS_TOKEN       # optional — enables Pinterest reference search
-```
-
-## Database Setup
-
-Run `supabase-schema.sql` in the Supabase SQL editor (creates tables, RLS, functions, storage buckets, seeds the admin). After deploying, uncomment and run the cron block at the bottom of that file to enable session cleanup.
+Full documentation lives in the workspace `docs/` folder (one level up, outside this repo): overview, architecture, database, development guide and a doc per feature. Rules for Claude Code are in [`CLAUDE.md`](./CLAUDE.md).
