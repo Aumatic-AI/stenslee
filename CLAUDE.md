@@ -8,20 +8,22 @@ This is Next.js 16 — APIs, conventions and file structure differ from older ve
 ## What this app is
 The studio dashboard (`dashboard.stenslee.com`): tattoo studios' admins and designers manage customers, create AI tattoo designs, preview them on the body, print stencils, keep a design library and message customers on WhatsApp. Customers never log in. Multi-studio: every row is scoped by `organization_id` and protected by RLS.
 
-Full documentation lives in `../docs/` — start with `../docs/README.md`. Read the doc for the feature you are changing before you change it, and update it after.
+Docs live in `docs/`. Read the relevant section before changing something, and update it when behaviour changes.
 
 | Working on | Read |
 |---|---|
-| Login, signup, single device, proxy | `../docs/features/login-and-signup.md` |
-| Customers, phone verification | `../docs/features/customers.md` |
-| AI design, chat, rework, prompts | `../docs/features/ai-design/` |
-| Placement preview, stencil PDF | `../docs/features/placement-and-stencil/` |
-| Library | `../docs/features/library.md` |
-| WhatsApp | `../docs/features/whatsapp/` |
-| Plans, feature keys, credits, upgrade | `../docs/features/plans-credits-permissions/` |
-| Dashboard, designers, trash | `../docs/features/studio-admin.md` |
-| Tables, RLS, functions, storage | `../docs/database.md` |
-| System design, env vars | `../docs/architecture.md` |
+| Architecture, how a request flows | `docs/technical.md` §1–2 |
+| Login, signup, one device, proxy | `docs/technical.md` §3 |
+| RLS, which Supabase client, phone formats | `docs/technical.md` §4–5 |
+| Plans, feature keys, seats, credits | `docs/technical.md` §6 |
+| AI generation, jobs, prompts, session state | `docs/technical.md` §7–8 |
+| Images and storage | `docs/technical.md` §9 · `docs/database.md` §6 |
+| WhatsApp | `docs/technical.md` §10 |
+| Trash, retention, purge | `docs/technical.md` §11 |
+| Adding a route, feature key, table or AI action | `docs/technical.md` §13 (recipes) |
+| Env vars, local dev, production | `docs/technical.md` §14–16 |
+| Known issues | `docs/technical.md` §17 · `docs/database.md` §10 |
+| Tables, columns, RLS, functions, triggers | `docs/database.md` |
 
 ## Commands
 ```bash
@@ -51,4 +53,4 @@ No automated tests: type check + lint + build, then exercise the feature in a br
 - One Meta webhook URL per app (production) — delivery statuses never reach a local server.
 - Server calls to `supabase.co` failing (`ECONNRESET`, `check_failed`) on this Windows machine = ISP DNS block; DNS over HTTPS fixes it.
 - Never run two dev servers (or a build) on this folder at once; after starting a background dev server, kill its `node.exe` when done.
-- `../supabase-schema.sql` is out of date — the live database is the truth (`../docs/database.md`).
+- `../supabase-schema.sql` is out of date — the live database is the truth (`docs/database.md`). After a schema change, update `docs/database.md`.

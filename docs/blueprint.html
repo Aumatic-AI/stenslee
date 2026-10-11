@@ -1,0 +1,973 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stenslee Studio — Blueprint</title>
+<style>
+:root{--bg:#fbfaf7;--panel:#fff;--soft:#f3f0e8;--line:#e7e2d6;--text:#1c1a16;--muted:#6b6457;--gold:#a8842f;--gold-soft:#f6eed9;--blue:#2f6fca;--blue-soft:#e8f0fc;--green:#2f8a5b;--green-soft:#e5f4ec;--violet:#7354c4;--violet-soft:#efe9fb;--red:#c2453d;--red-soft:#fbe9e7;--amber:#b7791f;--amber-soft:#fdf3e1;--code:#f4f1ea;--shadow:0 1px 2px rgba(0,0,0,.04),0 6px 18px rgba(0,0,0,.05)}
+:root[data-theme="dark"]{--bg:#0f0e0c;--panel:#17150f;--soft:#1e1b15;--line:#2b2720;--text:#efe9dc;--muted:#9c937f;--gold:#d4ae55;--gold-soft:#2a2414;--blue:#7fb0ff;--blue-soft:#15233a;--green:#6fd3a0;--green-soft:#11281d;--violet:#b9a2ff;--violet-soft:#211a37;--red:#ff8a80;--red-soft:#33171a;--amber:#f2bd5c;--amber-soft:#2e2310;--code:#1d1a14;--shadow:none}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f0e0c;--panel:#17150f;--soft:#1e1b15;--line:#2b2720;--text:#efe9dc;--muted:#9c937f;--gold:#d4ae55;--gold-soft:#2a2414;--blue:#7fb0ff;--blue-soft:#15233a;--green:#6fd3a0;--green-soft:#11281d;--violet:#b9a2ff;--violet-soft:#211a37;--red:#ff8a80;--red-soft:#33171a;--amber:#f2bd5c;--amber-soft:#2e2310;--code:#1d1a14;--shadow:none}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:76px}
+body{margin:0;background:var(--bg);color:var(--text);font:15.5px/1.7 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Inter,sans-serif}
+a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
+code{font:12.5px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;background:var(--code);border:1px solid var(--line);border-radius:5px;padding:1px 5px;overflow-wrap:anywhere}
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;height:60px;padding:0 20px;background:color-mix(in oklab,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.brand{font-weight:800;letter-spacing:.03em;white-space:nowrap}.brand i{font-style:normal}.btn{white-space:nowrap}.brand span{color:var(--gold)}.sp{flex:1}
+.btn{border:1px solid var(--line);background:var(--panel);color:var(--text);border-radius:9px;padding:7px 11px;cursor:pointer;font:inherit;font-size:13px}
+.menu{display:none}.stat{font-size:13px;color:var(--muted)}
+.layout{display:grid;grid-template-columns:270px minmax(0,1fr)}
+aside{position:sticky;top:60px;height:calc(100vh - 60px);overflow:auto;border-right:1px solid var(--line);background:var(--panel);padding:14px 12px 40px}
+aside input{width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--text);font:inherit;font-size:14px;margin-bottom:10px}
+aside a{display:block;color:var(--muted);border-radius:7px;padding:4px 8px;font-size:13.5px;line-height:1.4}
+aside a:hover{background:var(--soft);color:var(--text);text-decoration:none}
+aside a.on{background:var(--gold-soft);color:var(--text)}
+aside .f{font-weight:650;color:var(--text);margin-top:8px}
+aside .sub{margin:0 0 4px 12px;border-left:1px solid var(--line);padding-left:6px}
+aside .sub a{font-size:12.8px}
+main{padding:28px clamp(16px,4vw,56px) 120px;max-width:1000px;min-width:0}
+.feature{margin-bottom:72px}
+.hero{display:flex;gap:18px;align-items:flex-start;padding:24px;border:1px solid var(--line);border-radius:18px;background:linear-gradient(135deg,var(--gold-soft),var(--panel) 62%);box-shadow:var(--shadow);margin-bottom:22px}
+.icon{font-size:28px;width:54px;height:54px;flex:none;display:grid;place-items:center;border-radius:14px;background:var(--panel);border:1px solid var(--line)}
+.eyebrow{margin:0;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);font-weight:700}
+.hero h2{margin:2px 0 6px;font-size:27px;line-height:1.2}.hero p{margin:0;color:var(--muted)}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}.chips a{font-size:12.5px;padding:4px 11px;border-radius:999px;background:var(--panel);border:1px solid var(--line);color:var(--text)}
+.facts{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:0 0 18px}
+.facts div{border:1px solid var(--line);border-radius:12px;padding:10px 14px;background:var(--panel);font-size:14px}
+.facts b{display:block;font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:650}
+.diagram{margin:10px 0 22px;padding:16px;border:1px solid var(--line);border-radius:14px;background:var(--panel);overflow:auto;box-shadow:var(--shadow)}
+.diagram pre{margin:0;display:flex;justify-content:center}
+h3{font-size:19px;margin:34px 0 12px;display:flex;align-items:center;gap:10px}
+h3 .tag{font-size:11px;letter-spacing:.08em;text-transform:uppercase;background:var(--soft);color:var(--muted);padding:3px 8px;border-radius:6px}
+ol.steps{list-style:none;counter-reset:s;margin:0;padding:0 0 0 22px;position:relative}
+ol.steps::before{content:"";position:absolute;left:8px;top:6px;bottom:6px;width:2px;background:var(--line)}
+ol.steps>li{counter-increment:s;position:relative;margin:0 0 12px 18px;padding:12px 16px;border:1px solid var(--line);border-radius:13px;background:var(--panel);box-shadow:var(--shadow)}
+ol.steps>li::before{content:counter(s);position:absolute;left:-41px;top:12px;width:30px;height:30px;border-radius:10px;background:var(--gold);color:#fff;font-weight:800;font-size:13px;display:grid;place-items:center;box-shadow:0 0 0 4px var(--bg)}
+li h5{margin:0 0 4px;font-size:15.5px;line-height:1.35}
+li p{margin:0 0 6px;color:var(--text)}
+.m{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--muted)}
+.m span::before{display:inline-block;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;padding:1px 7px;border-radius:6px;margin-right:6px;font-weight:650}
+.m .w::before{content:"Where";background:var(--blue-soft);color:var(--blue)}
+.m .d::before{content:"Data";background:var(--violet-soft);color:var(--violet)}
+.m .s::before{content:"User sees";background:var(--green-soft);color:var(--green)}
+.m .x::before{content:"If it fails";background:var(--red-soft);color:var(--red)}
+.note{margin:12px 0 18px;padding:12px 16px;border-radius:12px;border:1px solid var(--blue);border-left-width:4px;background:var(--blue-soft)}
+.note.warn{border-color:var(--amber);background:var(--amber-soft)}
+.note b:first-child{display:block;font-size:12px;letter-spacing:.07em;text-transform:uppercase;margin-bottom:2px}
+.issues{margin:16px 0 0;padding:12px 16px 4px;border:1px dashed var(--line);border-radius:12px}
+.issues h4{margin:0 0 6px;font-size:13px;letter-spacing:.07em;text-transform:uppercase;color:var(--red)}
+.issues ul{margin:0 0 8px;padding-left:20px;font-size:14px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:8px 0 22px}
+.grid a{display:flex;flex-direction:column;gap:4px;padding:14px;border:1px solid var(--line);border-radius:14px;background:var(--panel);color:var(--text)}
+.grid a span{font-size:22px}.grid a:hover{border-color:var(--gold);text-decoration:none}
+.hidden{display:none!important}
+.top{position:fixed;right:18px;bottom:18px;width:42px;height:42px;border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--text);cursor:pointer;font-size:18px;box-shadow:var(--shadow)}
+@media (max-width:980px){.layout{grid-template-columns:minmax(0,1fr)}aside{position:fixed;left:0;top:60px;width:290px;z-index:30;transform:translateX(-102%);transition:transform .25s}body.nav aside{transform:none}.menu{display:inline-block}.stat{display:none}.facts{grid-template-columns:1fr}.grid{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:560px){.bp{display:none}.hero{flex-direction:column;padding:18px}ol.steps{padding-left:14px}ol.steps>li{margin-left:14px}ol.steps>li::before{left:-33px;width:26px;height:26px;font-size:12px}}
+@media print{.topbar,aside,.top{display:none}.layout{display:block}}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <button class="btn menu" onclick="document.body.classList.toggle('nav')" aria-label="Menu">☰</button>
+  <div class="brand">STENSLEE <span>STUDIO</span><i class="bp"> · Blueprint</i></div>
+  <div class="sp"></div>
+  <span class="stat">8 features · how every flow runs</span>
+  <button class="btn" id="theme" aria-label="Toggle theme">◐ Theme</button>
+</header>
+<div class="layout">
+<aside>
+  <input id="q" type="search" placeholder="Search…" aria-label="Search">
+  <a class="f" href="#intro">🧭 Introduction</a>
+  <a class="f" href="#login">🔐 Login &amp; signup</a>
+  <div class="sub"><a href="#login-1">Log in</a><a href="#login-2">Sign up a studio</a><a href="#login-3">Every request</a><a href="#login-4">One device at a time</a></div>
+  <a class="f" href="#customers">👥 Customers</a>
+  <div class="sub"><a href="#cust-1">Find a customer</a><a href="#cust-2">Add with phone check</a><a href="#cust-3">Customer profile</a></div>
+  <a class="f" href="#ai">✨ AI design</a>
+  <div class="sub"><a href="#ai-1">Start a session</a><a href="#ai-2">Generate 5 designs</a><a href="#ai-3">Refine in chat</a><a href="#ai-4">Text tattoo</a><a href="#ai-5">Enhance with AI</a><a href="#ai-6">References</a><a href="#ai-7">Upload / previous</a><a href="#ai-8">Rework + flash</a><a href="#ai-9">Reload resumes</a></div>
+  <a class="f" href="#placement">🖐️ Placement &amp; stencil</a>
+  <div class="sub"><a href="#pl-1">Open placement</a><a href="#pl-2">Body photo editor</a><a href="#pl-3">AI preview</a><a href="#pl-4">Finalize</a><a href="#pl-5">Stencil PDF</a></div>
+  <a class="f" href="#library">📁 Design library</a>
+  <div class="sub"><a href="#lib-1">Open the library</a><a href="#lib-2">Folders &amp; uploads</a><a href="#lib-3">Zip upload</a><a href="#lib-4">Trash &amp; restore</a></div>
+  <a class="f" href="#whatsapp">💬 WhatsApp</a>
+  <div class="sub"><a href="#wa-1">Connect a number</a><a href="#wa-2">Disconnect</a><a href="#wa-3">Templates</a><a href="#wa-4">Send to customers</a><a href="#wa-5">Delivery webhook</a><a href="#wa-6">Platform codes</a></div>
+  <a class="f" href="#plans">🎟️ Plans, credits &amp; permissions</a>
+  <div class="sub"><a href="#plan-1">Features in the browser</a><a href="#plan-2">Server feature check</a><a href="#plan-3">Seat check</a><a href="#plan-4">AI credits</a><a href="#plan-5">Credits widget &amp; banner</a><a href="#plan-6">Super admin changes</a></div>
+  <a class="f" href="#admin">🛠️ Studio admin</a>
+  <div class="sub"><a href="#adm-1">Opening an admin page</a><a href="#adm-2">Dashboard</a><a href="#adm-3">Add a designer</a><a href="#adm-4">Edit &amp; remove</a><a href="#adm-5">Trash</a><a href="#adm-6">Automatic purge</a></div>
+</aside>
+<main>
+
+<!-- ============ INTRO ============ -->
+<section class="feature" id="intro">
+  <header class="hero"><div class="icon">🧭</div><div>
+    <p class="eyebrow">Stenslee Studio</p>
+    <h2>How the studio dashboard works</h2>
+    <p>Every feature, step by step: what happens, which file runs it, what data changes and what the user sees. Tables and rules: <a href="database.md">database.md</a>. Architecture and approach: <a href="technical.md">technical.md</a>.</p>
+  </div></header>
+  <p>Tattoo studios use <b>dashboard.stenslee.com</b>. A designer finds or adds a customer, creates tattoo designs with AI, shows a realistic preview on the customer's body and prints a stencil. The admin also runs the team, the design library, WhatsApp messages and deleted work. Customers never log in — staff act for them in the studio.</p>
+  <div class="facts">
+    <div><b>Studio admin</b>Everything a designer does, plus team, dashboard, library, WhatsApp and trash.</div>
+    <div><b>Designer</b>Customers, AI designs, previews and stencils. Sees only the sessions they handled.</div>
+    <div><b>Customer</b>Never logs in. Name, verified number and tattoo photos are saved per studio.</div>
+  </div>
+  <div class="diagram"><pre class="mermaid">flowchart LR
+  U["Admin or designer"] --> P["proxy.ts&lt;br/&gt;login check"]
+  P --> PG["Pages"]
+  PG --> API["API routes"]
+  PG --> SB[("Supabase&lt;br/&gt;DB + RLS, Auth, Storage")]
+  API --> SB
+  API --> KIE["KIE.ai images"]
+  API --> OAI["OpenAI"]
+  API --> META["Meta WhatsApp"]
+  SB -- "Send SMS hook" --> API
+  META -- "webhook" --> API</pre></div>
+  <div class="diagram"><pre class="mermaid">flowchart LR
+  A["Log in"] --> B["Find or add customer"] --> C["New session"] --> D["AI designs + refine"] --> E["Finalize"] --> F["Body preview"] --> G["Stencil PDF"] --> H["History"]</pre></div>
+  <div class="grid">
+    <a href="#login"><span>🔐</span><b>Login &amp; signup</b></a>
+    <a href="#customers"><span>👥</span><b>Customers</b></a>
+    <a href="#ai"><span>✨</span><b>AI design</b></a>
+    <a href="#placement"><span>🖐️</span><b>Placement &amp; stencil</b></a>
+    <a href="#library"><span>📁</span><b>Design library</b></a>
+    <a href="#whatsapp"><span>💬</span><b>WhatsApp</b></a>
+    <a href="#plans"><span>🎟️</span><b>Plans &amp; credits</b></a>
+    <a href="#admin"><span>🛠️</span><b>Studio admin</b></a>
+  </div>
+  <div class="note"><b>How to read a step</b>Each numbered card is one step in order. <b style="display:inline;text-transform:none;letter-spacing:0;font-size:inherit">Where</b> = file → function, <b style="display:inline;text-transform:none;letter-spacing:0;font-size:inherit">Data</b> = what is read or written, <b style="display:inline;text-transform:none;letter-spacing:0;font-size:inherit">User sees</b> = the screen, <b style="display:inline;text-transform:none;letter-spacing:0;font-size:inherit">If it fails</b> = the error path.</div>
+</section>
+
+<!-- ============ LOGIN ============ -->
+<section class="feature" id="login">
+  <header class="hero"><div class="icon">🔐</div><div>
+    <p class="eyebrow">Feature</p><h2>Login &amp; signup</h2>
+    <p>Staff log in with a code sent on WhatsApp. New studios sign themselves up. Each account is signed in on one device at a time, for at most 72 hours.</p>
+    <div class="chips"><a href="#login-1">Log in</a><a href="#login-2">Sign up</a><a href="#login-3">Every request</a><a href="#login-4">One device</a></div>
+  </div></header>
+  <div class="facts">
+    <div><b>Pages</b><code>/studio/login</code> · <code>/studio/signup</code></div>
+    <div><b>Key files</b><code>login/page.tsx</code> · <code>signup/page.tsx</code> · <code>proxy.ts</code> · <code>api/auth/send-whatsapp-otp</code></div>
+    <div><b>Data</b><code>auth.users</code> · <code>staff</code> · <code>signup_requests</code> · <code>organizations</code></div>
+  </div>
+  <div class="diagram"><pre class="mermaid">sequenceDiagram
+  participant B as Browser
+  participant SA as Supabase Auth
+  participant H as send-whatsapp-otp
+  participant M as Meta WhatsApp
+  B->>SA: signInWithOtp(phone)
+  SA->>H: hook with phone + code
+  H->>H: signature ok, number allowed
+  H->>M: send code template
+  M-->>B: code on WhatsApp
+  B->>SA: verifyOtp(code)
+  SA-->>B: login cookie
+  B->>B: claim_staff_session, sign out other devices</pre></div>
+
+  <h3 id="login-1">Log in <span class="tag">existing staff</span></h3>
+  <ol class="steps">
+    <li><h5>The person opens the login page</h5>
+      <p>The proxy runs first. A logged-in, valid staff member is sent straight to their dashboard; anyone else sees the form. The page reads <code>?error=</code> to show messages like "signed in on another device".</p>
+      <div class="m"><span class="w"><code>proxy.ts</code> → <code>proxy()</code>, <code>login/page.tsx</code> → <code>LoginForm</code></span></div></li>
+    <li><h5>They type their mobile number</h5>
+      <p>The country picker defaults to +91. The number is checked: India needs 10 digits, other countries 4–14, and the full number at most 15 digits.</p>
+      <div class="m"><span class="w"><code>&lt;PhoneInput&gt;</code>, <code>handleSendCode()</code> → <code>isValidPhone()</code></span><span class="x">"Enter a valid phone number."</span></div></li>
+    <li><h5>The page asks Supabase for a code</h5>
+      <p>Supabase is asked to start a phone login, and told never to create a new account here.</p>
+      <div class="m"><span class="w"><code>supabase.auth.signInWithOtp({ phone, shouldCreateUser: false })</code></span><span class="x">unknown number → "This number isn't registered…"</span></div></li>
+    <li><h5>Supabase calls Stenslee's hook</h5>
+      <p>Instead of sending an SMS, Supabase POSTs the user id, phone and code to the hook. The hook checks the signature, then allows the code only for an active, non-removed staff member or a number with a signup started in the last 15 minutes.</p>
+      <div class="m"><span class="w"><code>api/auth/send-whatsapp-otp</code> → <code>isValidSupabaseSignature()</code>, <code>isAllowedToLogIn()</code></span><span class="d">reads <code>staff</code>, <code>signup_requests</code></span></div></li>
+    <li><h5>The code goes out on WhatsApp</h5>
+      <p>The code is sent from Stenslee's own WhatsApp number using an Authentication template. Refusals are answered with HTTP 200 and an error body, because that is the only way Supabase shows the message.</p>
+      <div class="m"><span class="w"><code>sendAuthOtp()</code> → <code>sendTemplateMessage()</code> in <code>graph.ts</code></span><span class="s">code step with a 60-second resend timer</span></div></li>
+    <li><h5>They type the code and Supabase checks it</h5>
+      <p>A correct code creates the login session cookie <code>sb-cleopatra-studio-auth</code>.</p>
+      <div class="m"><span class="w"><code>handleVerify()</code> → <code>verifyOtp({ phone, token, type: "sms" })</code></span><span class="x">"Incorrect or expired code."</span></div></li>
+    <li><h5>The page checks the staff row</h5>
+      <p>Role, active flag and removal are read. A deactivated or removed person is signed out again.</p>
+      <div class="m"><span class="d">reads <code>staff</code> role, is_active, deleted_at</span><span class="x">"Your account has been deactivated…"</span></div></li>
+    <li><h5>This device becomes the only device</h5>
+      <p><code>claim_staff_session()</code> writes this login's session id into <code>staff.current_session_id</code> and stamps <code>last_login_at</code>; then every other device is signed out.</p>
+      <div class="m"><span class="w"><code>supabase.rpc("claim_staff_session")</code>, <code>signOut({ scope: "others" })</code></span><span class="d">writes <code>staff.current_session_id</code>, <code>last_login_at</code></span></div></li>
+    <li><h5>The right dashboard opens</h5>
+      <p>Admins go to <code>/studio/admin</code>, designers to <code>/studio/designer</code> (or back to <code>?next=</code>).</p>
+      <div class="m"><span class="w"><code>router.push(dest)</code></span><span class="s">dashboard</span></div></li>
+  </ol>
+
+  <h3 id="login-2">Sign up a studio <span class="tag">self-serve</span></h3>
+  <ol class="steps">
+    <li><h5>The person fills in the signup form</h5>
+      <p>Usually from the website's "Get started free" button. Fields: studio name, your name, email, mobile number. The browser checks each field first.</p>
+      <div class="m"><span class="w"><code>signup/page.tsx</code> → <code>handleSendCode()</code></span><span class="x">"Enter a valid email address."</span></div></li>
+    <li><h5>The server checks the number is free and saves the request</h5>
+      <p>A number already used by staff is refused: active → "already part of a studio" with a Log in link; deactivated or removed → "used with a studio before". Otherwise a signup request is saved, keyed by the phone digits.</p>
+      <div class="m"><span class="w"><code>requestCode()</code> → <code>POST /api/signup/start</code> → <code>findStaffByPhone()</code></span><span class="d">upserts <code>signup_requests</code></span></div></li>
+    <li><h5>A code is sent</h5>
+      <p>This time Supabase may create the login. The hook allows the code because a fresh signup request exists.</p>
+      <div class="m"><span class="w"><code>signInWithOtp({ phone, shouldCreateUser: true })</code></span><span class="d">creates <code>auth.users</code> row</span></div></li>
+    <li><h5>The code is verified</h5>
+      <div class="m"><span class="w"><code>handleVerify()</code> → <code>verifyOtp()</code></span></div></li>
+    <li><h5>The server creates the studio</h5>
+      <p>It finds the signup request (less than 15 minutes old), confirms the person isn't already staff, picks the free plan, and creates the organization with a unique slug, the email and the plan's AI credits.</p>
+      <div class="m"><span class="w"><code>POST /api/signup/complete</code> → <code>createOrganization()</code></span><span class="d">inserts <code>organizations</code></span><span class="x">"This signup has expired. Please start again."</span></div></li>
+    <li><h5>The person becomes the studio's admin</h5>
+      <p>A staff row with role admin is created and the signup request is deleted.</p>
+      <div class="m"><span class="d">inserts <code>staff</code>, deletes <code>signup_requests</code></span></div></li>
+    <li><h5>The admin dashboard opens</h5>
+      <p>The session is claimed exactly like a login, then <code>/studio/admin</code> opens.</p>
+      <div class="m"><span class="w"><code>claim_staff_session</code> → <code>router.push("/studio/admin")</code></span><span class="s">admin dashboard</span></div></li>
+  </ol>
+
+  <h3 id="login-3">Every request <span class="tag">proxy.ts</span></h3>
+  <div class="diagram"><pre class="mermaid">flowchart TD
+  A["Request"] --> B{"Public path?"}
+  B -- yes --> Z["Continue"]
+  B -- no --> C{"Login cookie?"}
+  C -- no --> L["/studio/login?next=…"]
+  C -- yes --> D{"Staff active, not removed,&lt;br/&gt;login under 72 h,&lt;br/&gt;same device?"}
+  D -- no --> F["Sign out this device&lt;br/&gt;login with reason"]
+  D -- yes --> G{"Page"}
+  G -- "login or signup" --> H["Own dashboard"]
+  G -- "admin page, designer" --> I["/studio/designer"]
+  G -- other --> Z</pre></div>
+  <div class="note"><b>Why it fails open</b>The staff lookup is limited to 1.5 seconds. If it can't finish, the request continues — the page and the database rules still protect the data.</div>
+
+  <h3 id="login-4">One device at a time</h3>
+  <ol class="steps">
+    <li><h5>A new login claims the session</h5>
+      <p>The newest login's id is stored in <code>staff.current_session_id</code>.</p>
+      <div class="m"><span class="w"><code>claim_staff_session()</code></span></div></li>
+    <li><h5>The old device notices</h5>
+      <p><code>SingleSessionGuard</code> listens to the user's own staff row through Realtime and re-checks when the tab is focused. A different session id means this device was replaced.</p>
+      <div class="m"><span class="w"><code>SingleSessionGuard.tsx</code></span><span class="d">Realtime on <code>staff</code></span></div></li>
+    <li><h5>The old device is signed out</h5>
+      <p>It signs out locally and opens the login page with the reason. The proxy also blocks any further request from it.</p>
+      <div class="m"><span class="s">"You were logged out because your account was signed in on another device."</span></div></li>
+  </ol>
+  <div class="issues"><h4>Known issues</h4><ul>
+    <li>Unfinished signups leave a login behind (reused later if the number is added as a designer).</li>
+    <li>Old <code>signup_requests</code> are never deleted.</li>
+    <li>The Supabase hook is shared with production — pointing it at a local server breaks production logins.</li>
+  </ul></div>
+</section>
+
+<!-- ============ CUSTOMERS ============ -->
+<section class="feature" id="customers">
+  <header class="hero"><div class="icon">👥</div><div>
+    <p class="eyebrow">Feature</p><h2>Customers</h2>
+    <p>Find a customer by name or phone, add new ones after a WhatsApp phone check, and see each customer's full tattoo history.</p>
+    <div class="chips"><a href="#cust-1">Find</a><a href="#cust-2">Add</a><a href="#cust-3">Profile</a></div>
+  </div></header>
+  <div class="facts">
+    <div><b>Pages</b><code>/studio/designer</code> · <code>/studio/admin/customers</code> · <code>/customer/[userId]</code></div>
+    <div><b>Key files</b><code>designer/page.tsx</code> · <code>AddCustomerModal.tsx</code> · <code>api/customers/*</code></div>
+    <div><b>Data</b><code>customers</code> · <code>customer_phone_verifications</code> · <code>customer_session_stats</code></div>
+  </div>
+  <div class="diagram"><pre class="mermaid">flowchart LR
+  A["Type name or phone"] --> B{"Match?"}
+  B -- yes --> C["Pick customer"] --> D["Start design or history"]
+  B -- no --> E["Form prefilled"] --> F["WhatsApp code to customer"] --> G["Verify"] --> H["Customer saved"] --> D</pre></div>
+
+  <h3 id="cust-1">Find a customer</h3>
+  <ol class="steps">
+    <li><h5>The designer types in the search box</h5>
+      <p>Every change searches by name or phone. Results only include this studio (database rules).</p>
+      <div class="m"><span class="w"><code>designer/page.tsx</code> → <code>supabase.rpc("search_customers", { q })</code></span><span class="d">reads <code>customers</code></span></div></li>
+    <li><h5>No match: the form fills itself</h5>
+      <p>Digits go into the phone field, letters into the name field, ready to add.</p>
+      <div class="m"><span class="s">"No account found" form</span></div></li>
+    <li><h5>A match: the designer picks it</h5>
+      <p>The page counts the customer's completed sessions and offers <b>Start New Design</b> or <b>History</b>.</p>
+      <div class="m"><span class="w"><code>handleSelectCustomer()</code></span><span class="d">counts <code>sessions</code></span></div></li>
+  </ol>
+
+  <h3 id="cust-2">Add a customer with a phone check</h3>
+  <ol class="steps">
+    <li><h5>Name and phone are entered</h5>
+      <p>The same steps exist on the designer dashboard and in the admin's Add Customer pop-up. The pop-up first checks the number isn't already a customer here.</p>
+      <div class="m"><span class="w"><code>AddCustomerModal.tsx</code> → <code>handleSendCode()</code></span></div></li>
+    <li><h5>A code is sent to the customer</h5>
+      <p>The server creates a 6-digit code valid for 10 minutes and sends it from Stenslee's WhatsApp number.</p>
+      <div class="m"><span class="w"><code>POST /api/customers/send-verification</code></span><span class="d">inserts <code>customer_phone_verifications</code></span></div></li>
+    <li><h5>The customer reads out the code</h5>
+      <p>The server checks code, phone, studio and expiry, then marks it verified.</p>
+      <div class="m"><span class="w"><code>POST /api/customers/verify-phone</code></span><span class="x">"Incorrect or expired code."</span></div></li>
+    <li><h5>The customer is saved</h5>
+      <p>A database trigger only allows the insert if this phone was verified in the last 15 minutes. Phones are unique per studio — the same person can be a customer at other studios too.</p>
+      <div class="m"><span class="d">inserts <code>customers</code> (trigger <code>customers_require_phone_verification</code>)</span></div></li>
+    <li><h5>The first session starts (designer flow)</h5>
+      <p>A session id is generated and a session row is created for this customer, handled by the designer.</p>
+      <div class="m"><span class="w"><code>startSession()</code> in <code>app-store.ts</code></span><span class="d">inserts <code>sessions</code></span><span class="s">Design page</span></div></li>
+  </ol>
+
+  <h3 id="cust-3">Customer profile and history</h3>
+  <ol class="steps">
+    <li><h5>The profile loads</h5>
+      <p>Customer details, finished tattoos and in-progress sessions load together. Rework "before" photos are fetched in one batch from the chat history.</p>
+      <div class="m"><span class="w"><code>customer/[userId]/page.tsx</code> → <code>load()</code></span><span class="d">reads <code>customers</code>, <code>sessions</code>, <code>chat_messages</code></span></div></li>
+    <li><h5>History cards show before/after</h5>
+      <p>AI designs show design → placement preview; reworks show the original tattoo photo → new design. Filter by type.</p>
+      <div class="m"><span class="s">Tattoo History grid</span></div></li>
+    <li><h5>Edit or start a new tattoo</h5>
+      <p>Name and phone can be edited (the new phone is not re-verified). <b>+ New Tattoo</b> starts a session.</p>
+      <div class="m"><span class="w"><code>handleNewTattoo()</code> → <code>startSessionForUser()</code></span></div></li>
+  </ol>
+  <div class="issues"><h4>Known issues</h4><ul>
+    <li>No way to delete a customer.</li>
+    <li>Verification codes are stored in plain text and never cleaned up.</li>
+    <li>Phone edits skip verification.</li>
+  </ul></div>
+</section>
+
+<!-- ============ AI DESIGN ============ -->
+<section class="feature" id="ai">
+  <header class="hero"><div class="icon">✨</div><div>
+    <p class="eyebrow">Feature</p><h2>AI design</h2>
+    <p>Create tattoo designs with AI from a description and reference images, refine them in a chat, make lettering, rework existing tattoos, or start from an uploaded or previous design.</p>
+    <div class="chips"><a href="#ai-2">Generate</a><a href="#ai-3">Refine</a><a href="#ai-4">Text</a><a href="#ai-8">Rework</a></div>
+  </div></header>
+  <div class="facts">
+    <div><b>Pages</b><code>/[sessionId]/design</code> · <code>/[sessionId]/chat</code></div>
+    <div><b>Key files</b><code>chat/page.tsx</code> · <code>api/generate*</code> · <code>generation-jobs.ts</code> · <code>kei-api.ts</code></div>
+    <div><b>Data</b><code>sessions</code> · <code>chat_messages</code> · <code>usage_logs</code> · storage <code>session-assets</code></div>
+  </div>
+  <div class="diagram"><pre class="mermaid">sequenceDiagram
+  participant C as Chat page
+  participant G as /api/generate
+  participant J as job tracker
+  participant K as KIE.ai
+  participant S as /api/generation-status
+  C->>G: description, style, references
+  G->>G: feature check, reserve credits
+  G->>J: start job, 5 slots
+  G-->>C: started
+  G->>K: 5 tasks in parallel
+  loop every 5 s
+    C->>S: job status?
+    S-->>C: finished slots
+  end
+  C->>C: upload each image, save to chat</pre></div>
+
+  <h3 id="ai-1">Start a session</h3>
+  <ol class="steps">
+    <li><h5>"+ New Tattoo" on the customer page</h5>
+      <p>The store creates the session row (8-character id, status active, handled by this staff member) and opens the Design page.</p>
+      <div class="m"><span class="w"><code>handleNewTattoo()</code> → <code>startSessionForUser()</code></span><span class="d">inserts <code>sessions</code></span></div></li>
+    <li><h5>The Design page loads the session</h5>
+      <p>If the store already holds this session it skips loading (the store can be ahead of the database); otherwise it reloads it from the database.</p>
+      <div class="m"><span class="w"><code>design/page.tsx</code> → <code>hydrateFromSession()</code></span><span class="d">reads <code>sessions</code>, <code>chat_messages</code></span></div></li>
+    <li><h5>Plan features decide which tabs work</h5>
+      <p>AI Design, Upload Existing, Rework, Camera, Pinterest, Browse Previous, Text Tattoo and Enhance are each checked; locked ones show a lock.</p>
+      <div class="m"><span class="w"><code>useFeature()</code> in <code>use-feature.ts</code></span></div></li>
+  </ol>
+
+  <h3 id="ai-2">Generate the first 5 designs</h3>
+  <ol class="steps">
+    <li><h5>The designer fills in the form</h5>
+      <p>Style (70+), description, up to 5 references, ink colours, body area. Everything goes into the Zustand store.</p>
+      <div class="m"><span class="d">localStorage <code>cleopatra-app-store</code></span></div></li>
+    <li><h5>"✦ Generate Tattoo Designs" opens the chat</h5>
+      <p>A "pending generation" flag is set and the Chat page opens and starts the batch once.</p>
+      <div class="m"><span class="w"><code>handleGenerate()</code> → <code>chat/page.tsx</code> → <code>startGeneration()</code></span></div></li>
+    <li><h5>References are uploaded from the browser</h5>
+      <p>Local images are uploaded to <code>{sessionId}/refs/</code>; already-hosted ones are reused.</p>
+      <div class="m"><span class="w"><code>uploadPhotoDirect()</code> in <code>browser-upload.ts</code></span><span class="d">storage <code>session-assets</code></span></div></li>
+    <li><h5>The session and chat are written</h5>
+      <p>Style, description and body area are saved on the session; a user message and an empty assistant message are created.</p>
+      <div class="m"><span class="w"><code>runGeneration()</code>, <code>syncSessionDetails()</code></span><span class="d">updates <code>sessions</code>, inserts <code>chat_messages</code></span></div></li>
+    <li><h5>The server checks the plan and builds the prompt</h5>
+      <p><code>requireFeature("ai_design")</code> must pass. The prompt comes from <code>buildTattooPrompt()</code>; the model is <code>gpt-image-2-image-to-image</code>.</p>
+      <div class="m"><span class="w"><code>api/generate/route.ts</code> → <code>POST()</code></span><span class="x">"description is required", plan limit messages</span></div></li>
+    <li><h5>Credits are reserved, the job starts, the server answers</h5>
+      <p>10 credits per image are reserved (fewer images if the balance is low). A job with 5 pending slots is stored in memory and the server replies at once.</p>
+      <div class="m"><span class="w"><code>reserveCredits()</code>, <code>startJob()</code></span><span class="d"><code>organizations.ai_credits_remaining</code></span><span class="x">"Out of AI credits"</span></div></li>
+    <li><h5>5 KIE tasks run in parallel</h5>
+      <p><code>rotateReferences()</code> gives each slot a different leading reference. Each task is polled every 3 s; finished images are downloaded and stored on the job. Failed images refund their credits.</p>
+      <div class="m"><span class="w"><code>runOneTask()</code> → <code>createKeiTask()</code> / <code>waitForKeiTask()</code></span></div></li>
+    <li><h5>The browser polls and saves each image</h5>
+      <p>Every 5 s it asks for the job. Each new image is uploaded to <code>{sessionId}/designs/</code> and added to the assistant message. Usage is logged once per batch.</p>
+      <div class="m"><span class="w"><code>watchJob()</code> → <code>/api/generation-status</code></span><span class="d"><code>chat_messages.image_keys</code>, <code>usage_logs</code></span><span class="s">5 designs appear one by one</span></div></li>
+  </ol>
+
+  <h3 id="ai-3">Refine in chat</h3>
+  <ol class="steps">
+    <li><h5>Select images and write the change</h5>
+      <p>Pick one or more designs, type the change ("thinner lines") and choose 1–5 new images (default 2).</p>
+      <div class="m"><span class="w"><code>toggleSelect()</code>, <code>handleSend()</code></span></div></li>
+    <li><h5>A refinement request is sent</h5>
+      <p>The instruction replaces the description, the selected images are the inputs, and <code>faithfulMode</code> can limit it to minor changes. The "needs a reference" rule is skipped.</p>
+      <div class="m"><span class="w"><code>runGeneration()</code> → <code>/api/generate</code></span><span class="d"><code>usage_logs</code> action refinement_round</span></div></li>
+    <li><h5>Results join the same chat</h5>
+      <p>Same job + poll flow. Every batch stays in the thread to compare; the viewer flips through all images.</p>
+      <div class="m"><span class="s">new batch under the instruction</span></div></li>
+  </ol>
+
+  <h3 id="ai-4">Text tattoo</h3>
+  <ol class="steps">
+    <li><h5>Turn on Text Tattoo mode</h5>
+      <p>A typography pop-up loads curated, system and Fontsource fonts.</p>
+      <div class="m"><span class="w"><code>TypographyGenerator.tsx</code></span></div></li>
+    <li><h5>Type the words, pick a font, add to references</h5>
+      <p>The lettering is drawn on a canvas, exported as PNG and uploaded as a reference.</p>
+      <div class="m"><span class="w"><code>handleTypographyGenerated()</code> → <code>/api/upload-ref</code></span><span class="d">storage <code>designs</code></span></div></li>
+    <li><h5>Generate with the lettering model</h5>
+      <p>Same flow, but the server uses <code>nano-banana-pro</code> and the text-tattoo prompt; <code>text_tattoo</code> must be on the plan.</p>
+      <div class="m"><span class="w"><code>/api/generate</code> with <code>isTextTattoo</code></span></div></li>
+  </ol>
+
+  <h3 id="ai-5">Enhance with AI</h3>
+  <ol class="steps">
+    <li><h5>Tap "Enhance with AI" under the description</h5>
+      <div class="m"><span class="w"><code>POST /api/enhance-prompt</code> with description + style</span></div></li>
+    <li><h5>OpenAI writes three better versions</h5>
+      <p>The server calls <code>gpt-4o-mini</code> and returns the variations; usage is logged.</p>
+      <div class="m"><span class="x">"OpenAI API key not configured", plan limit</span></div></li>
+    <li><h5>Pick one</h5>
+      <div class="m"><span class="s">description replaced</span></div></li>
+  </ol>
+
+  <h3 id="ai-6">References: Pinterest, camera, upload</h3>
+  <ol class="steps">
+    <li><h5>Pinterest search</h5>
+      <p>The server asks Pinterest's internal search endpoint, cleans the results and returns pins; thumbnails load from Pinterest.</p>
+      <div class="m"><span class="w"><code>PinterestSearch.tsx</code> → <code>/api/pinterest/search</code></span><span class="d"><code>usage_logs</code> pinterest_search</span></div></li>
+    <li><h5>Picking a pin</h5>
+      <p>The image is fetched through <code>/api/pinterest/image</code>, shown at once, then saved permanently to <code>refs</code> in the background.</p>
+      <div class="m"><span class="w"><code>addPin()</code> → <code>handleAddPinterestPin()</code></span></div></li>
+    <li><h5>Camera or files</h5>
+      <p>Files (jpg/png/webp/heic, up to 5) or a camera photo are kept in memory and uploaded when Generate is pressed.</p>
+      <div class="m"><span class="w"><code>useDropzone()</code>, <code>CameraCapture.tsx</code> → <code>usePhoto()</code></span></div></li>
+  </ol>
+
+  <h3 id="ai-7">Upload existing or browse previous</h3>
+  <ol class="steps">
+    <li><h5>Upload or photograph a ready design</h5>
+      <p>The file is uploaded to <code>designs</code> and skips AI generation.</p>
+      <div class="m"><span class="w"><code>handleDirectFileDrop()</code></span></div></li>
+    <li><h5>Or pick a previous design</h5>
+      <p>A pop-up lists finished designs the user may see (designers: their own), filterable by customer or designer.</p>
+      <div class="m"><span class="w"><code>PreviousDesignsModal.tsx</code></span><span class="d">reads <code>sessions.selected_design_key</code></span></div></li>
+    <li><h5>"Proceed to Placement"</h5>
+      <div class="m"><span class="w"><code>handleProceedDirect()</code></span><span class="s">Placement page</span></div></li>
+  </ol>
+
+  <h3 id="ai-8">Rework and the flash version</h3>
+  <ol class="steps">
+    <li><h5>Photo of the old tattoo + cover or extend</h5>
+      <div class="m"><span class="w"><code>handleGenerateRework()</code></span></div></li>
+    <li><h5>The photo is uploaded and the batch starts</h5>
+      <p>Photo to <code>rework-source</code>; the server uses the rework prompts and <code>gpt-image-2-image-to-image</code>; same credits, job and poll flow.</p>
+      <div class="m"><span class="w"><code>/api/generate-rework</code></span><span class="d"><code>usage_logs</code> via rework</span></div></li>
+    <li><h5>Edit rounds</h5>
+      <p>Selected results plus an instruction go back to the same route.</p></li>
+    <li><h5>Finalize starts a flash (white-background) version</h5>
+      <p>The chosen design is isolated on white for stencils; the session overview saves it when ready (and offers a manual retry).</p>
+      <div class="m"><span class="w"><code>startFlashGeneration()</code> → <code>/api/generate-flash</code></span><span class="d"><code>sessions.flash_image_key</code></span></div></li>
+  </ol>
+
+  <h3 id="ai-9">A page reload during a batch</h3>
+  <ol class="steps">
+    <li><h5>The server keeps working</h5>
+      <p>The job lives on the server, not in the browser request.</p></li>
+    <li><h5>The chat asks once if a job is running</h5>
+      <p>If the job exists, isn't done and the last message is the assistant's, polling resumes and finished images are saved.</p>
+      <div class="m"><span class="w"><code>load()</code> → <code>/api/generation-status</code></span></div></li>
+  </ol>
+  <div class="issues"><h4>Known issues</h4><ul>
+    <li><code>generation-status</code>, <code>upload-ref</code>, <code>proxy-image</code>, <code>pinterest/image</code> have no login check.</li>
+    <li>Jobs are kept in server memory (one server only); Pinterest uses an unofficial endpoint.</li>
+    <li>The store (with customer name and phone) stays in localStorage after logout.</li>
+  </ul></div>
+</section>
+
+<!-- ============ PLACEMENT ============ -->
+<section class="feature" id="placement">
+  <header class="hero"><div class="icon">🖐️</div><div>
+    <p class="eyebrow">Feature</p><h2>Placement &amp; stencil</h2>
+    <p>Show the design on the customer's body — described in words or placed on a real photo — then finalize and print a mirrored stencil.</p>
+    <div class="chips"><a href="#pl-2">Editor</a><a href="#pl-3">AI preview</a><a href="#pl-5">Stencil</a></div>
+  </div></header>
+  <div class="facts">
+    <div><b>Pages</b><code>/[sessionId]/placement</code> · <code>/studio/sessions/[id]</code></div>
+    <div><b>Key files</b><code>placement/page.tsx</code> · <code>TattooPlacementEditor.tsx</code> · <code>api/placement</code> · <code>print-stencil</code></div>
+    <div><b>Data</b><code>sessions.placement_*</code> · storage <code>body</code>, <code>composites</code>, <code>previews</code></div>
+  </div>
+  <div class="diagram"><pre class="mermaid">flowchart LR
+  A["Chosen design"] --> B{"How?"}
+  B -- describe --> C["Placement text"]
+  B -- photo --> D["Upload or camera"] --> E["Drag, resize, rotate"] --> F["Composite image"]
+  C --> G["AI preview on skin"]
+  F --> G
+  G --> H["Finalize"] --> I["Stencil PDF"]</pre></div>
+
+  <h3 id="pl-1">Open placement</h3>
+  <ol class="steps">
+    <li><h5>The chosen design is saved</h5>
+      <p>From the chat, upload or previous designs, the design is stored on the session and Placement opens.</p>
+      <div class="m"><span class="w"><code>selectDesign()</code>, <code>persistSelectedDesign()</code></span><span class="d"><code>sessions.selected_design_key</code></span></div></li>
+    <li><h5>The page restores state and checks the plan</h5>
+      <p>Saved values appear instantly from localStorage, then the session reloads; <code>placement</code> off → lock card. A running preview job is resumed.</p>
+      <div class="m"><span class="w"><code>placement/page.tsx</code> → <code>hydrateFromSession()</code></span></div></li>
+  </ol>
+
+  <h3 id="pl-2">Body photo and the editor</h3>
+  <ol class="steps">
+    <li><h5>Describe the spot, or switch to Upload / Camera</h5>
+      <p>Quick chips (forearm, back…) or free text; switching modes clears the other inputs.</p>
+      <div class="m"><span class="w"><code>handleModeChange()</code></span></div></li>
+    <li><h5>The editor places the design in the centre</h5>
+      <p>Drag to move, corner handle or wheel to resize, top handle to rotate.</p>
+      <div class="m"><span class="w"><code>TattooPlacementEditor.tsx</code></span></div></li>
+    <li><h5>"Confirm Placement" builds a composite</h5>
+      <p>The design is drawn onto the photo at the chosen position, size and angle.</p>
+      <div class="m"><span class="w"><code>handleConfirm()</code></span><span class="s">composite preview with Re-adjust</span></div></li>
+  </ol>
+
+  <h3 id="pl-3">AI preview generation</h3>
+  <ol class="steps">
+    <li><h5>Images are uploaded</h5>
+      <p>Composite to <code>composites</code>, original photo to <code>body</code> (photo path only).</p>
+      <div class="m"><span class="w"><code>handleGenerate()</code> → <code>uploadBase64Direct()</code>, <code>uploadPhotoDirect()</code></span></div></li>
+    <li><h5>The server checks the plan and reserves 1 image of credits</h5>
+      <div class="m"><span class="w"><code>api/placement</code> → <code>requireFeature("placement")</code>, <code>reserveCredits()</code></span></div></li>
+    <li><h5>Prompt and inputs are chosen</h5>
+      <p>Placement prompts from <code>features/placement/prompts.ts</code>; storage keys become public URLs KIE can download. Model: <code>gpt-image-2-image-to-image</code>.</p>
+      <div class="m"><span class="w"><code>toPublicUrl()</code> in <code>image-src.ts</code></span></div></li>
+    <li><h5>A job starts and the server answers at once</h5>
+      <p>Job key <code>placement:{sessionId}</code>. KIE is tried, retried once on failure, then credits are refunded.</p>
+      <div class="m"><span class="w"><code>startJob()</code>, <code>runKeiWithRetry()</code></span></div></li>
+    <li><h5>The browser polls every 4 s</h5>
+      <p>A progress bar and stage messages run meanwhile.</p>
+      <div class="m"><span class="w"><code>watchPlacementJob()</code></span></div></li>
+    <li><h5>The result is saved</h5>
+      <p>Uploaded to <code>previews</code> and stored on the session with the placement text and photo.</p>
+      <div class="m"><span class="w"><code>finishPlacement()</code>, <code>persistPlacement()</code></span><span class="d"><code>sessions.placement_text</code>, <code>placement_body_photo_key</code>, <code>placement_composite_key</code></span><span class="s">realistic preview</span></div></li>
+  </ol>
+
+  <h3 id="pl-4">Finalize</h3>
+  <ol class="steps">
+    <li><h5>"Finalize" completes the session</h5>
+      <div class="m"><span class="w"><code>handleFinalize()</code> → <code>finalizeSession()</code></span><span class="d"><code>sessions.status</code> = completed</span><span class="s">"Session Complete!"</span></div></li>
+    <li><h5>Back to the customer</h5>
+      <div class="m"><span class="s">customer profile with the new history card</span></div></li>
+  </ol>
+
+  <h3 id="pl-5">Stencil download</h3>
+  <ol class="steps">
+    <li><h5>Session details offer Download</h5>
+      <p>The printable image is the flash version (rework) or the chosen design.</p>
+      <div class="m"><span class="w"><code>SessionOverview.tsx</code></span></div></li>
+    <li><h5>The print studio sets defaults</h5>
+      <p>1 sheet, A4, PDF, 2 mm margin; the design is trimmed of empty edges.</p>
+      <div class="m"><span class="w"><code>TattooPrintStudio.tsx</code>, <code>loadTrimmedStencilImage()</code></span></div></li>
+    <li><h5>Size and layout are worked out in millimetres</h5>
+      <p>Large designs split across pages; the image is mirrored for transfer.</p>
+      <div class="m"><span class="w"><code>computeStencilLayout()</code></span></div></li>
+    <li><h5>PDF or image download</h5>
+      <div class="m"><span class="w"><code>downloadTattooStencilPdf()</code> / <code>downloadTattooStencilImage()</code></span><span class="s">file saved</span></div></li>
+  </ol>
+  <div class="issues"><h4>Known issues</h4><ul>
+    <li>Body photos live in a public bucket.</li>
+    <li>Permanent delete misses <code>rework</code>, <code>rework-source</code> and <code>flash</code> files.</li>
+  </ul></div>
+</section>
+
+<!-- ============ LIBRARY ============ -->
+<section class="feature" id="library">
+  <header class="hero"><div class="icon">📁</div><div>
+    <p class="eyebrow">Feature</p><h2>Design library</h2>
+    <p>The studio's shared folders of designs: create folders, upload images or whole zip files, and manage storage within the plan's quota.</p>
+    <div class="chips"><a href="#lib-2">Uploads</a><a href="#lib-3">Zip</a><a href="#lib-4">Trash</a></div>
+  </div></header>
+  <div class="facts">
+    <div><b>Page</b><code>/studio/admin/library</code> (admins)</div>
+    <div><b>Key files</b><code>library/page.tsx</code> · <code>library-storage.ts</code></div>
+    <div><b>Data</b><code>folders</code> · <code>folder_files</code> · storage <code>org-library</code></div>
+  </div>
+  <div class="diagram"><pre class="mermaid">flowchart LR
+  A["Pick files or zip"] --> B{"Fits quota?"}
+  B -- no --> X["Error shown"]
+  B -- yes --> C["Upload to org-library"] --> D["Insert folder_files"]
+  D --> E["Trigger: size + quota check"]
+  E --> F["Trigger: storage_used_bytes updated"]</pre></div>
+
+  <h3 id="lib-1">Open the library</h3>
+  <ol class="steps">
+    <li><h5>The page reads the open folder and plan values</h5>
+      <p><code>?folder=</code> selects the folder; <code>design_library</code>, <code>storage_quota</code> and <code>library_file_size_limit</code> are read.</p>
+      <div class="m"><span class="w"><code>library/page.tsx</code> → <code>useFeature()</code></span></div></li>
+    <li><h5>Contents load in parallel</h5>
+      <p>Storage used, sub-folders, the first 24 files and breadcrumbs; folder sizes load after.</p>
+      <div class="m"><span class="w"><code>load()</code>, <code>fetchFolderSizes()</code></span><span class="d">reads <code>organizations</code>, <code>folders</code>, <code>folder_files</code></span><span class="s">storage bar</span></div></li>
+  </ol>
+
+  <h3 id="lib-2">Folders and image uploads</h3>
+  <ol class="steps">
+    <li><h5>Create a folder</h5>
+      <p>RLS allows admins of the studio only; a trigger refuses if the library feature is off.</p>
+      <div class="m"><span class="w"><code>handleCreateFolder()</code></span><span class="d">inserts <code>folders</code></span></div></li>
+    <li><h5>Pick images</h5>
+      <p>The browser adds up the sizes and checks the quota first.</p>
+      <div class="m"><span class="w"><code>handleUploadImages()</code> → <code>wouldExceedQuota()</code></span></div></li>
+    <li><h5>Each file is uploaded, then recorded</h5>
+      <p>File to <code>org-library/{orgId}/{uuid}.{ext}</code>, then a row; the database re-checks size and quota and updates the storage counter.</p>
+      <div class="m"><span class="w"><code>uploadSingleImage()</code></span><span class="d"><code>folder_files</code>, <code>organizations.storage_used_bytes</code></span><span class="x">file too large / quota full</span></div></li>
+  </ol>
+
+  <h3 id="lib-3">Zip upload</h3>
+  <ol class="steps">
+    <li><h5>The zip is read in the browser</h5>
+      <p>Images are extracted and checked; quota checked against the total.</p>
+      <div class="m"><span class="w"><code>parseZipFile()</code></span></div></li>
+    <li><h5>Folders are created or reused, then files uploaded</h5>
+      <p>The zip's folder structure is recreated inside the current folder.</p>
+      <div class="m"><span class="w"><code>commitParsedZip()</code></span><span class="s">progress "Uploading {file}"</span></div></li>
+  </ol>
+
+  <h3 id="lib-4">Trash, restore and delete forever</h3>
+  <ol class="steps">
+    <li><h5>Delete moves items to Trash</h5>
+      <p>Files and folders get <code>deleted_at</code>; deleting a folder trashes everything inside. Trashed files still count toward the quota.</p>
+      <div class="m"><span class="w"><code>trashLibraryFile()</code>, <code>trashLibraryFolder()</code></span></div></li>
+    <li><h5>Restore from Trash</h5>
+      <p>Restoring a file also restores its parent folders.</p>
+      <div class="m"><span class="w"><code>restoreLibraryFile()</code></span></div></li>
+    <li><h5>Delete forever</h5>
+      <p>The storage object and row are removed.</p>
+      <div class="m"><span class="w"><code>purgeLibraryFile()</code></span></div></li>
+  </ol>
+  <div class="issues"><h4>Known issues</h4><ul>
+    <li>Automatic purge never runs (cron misconfigured); trashed files keep using quota.</li>
+    <li>The bucket is public.</li>
+  </ul></div>
+</section>
+
+<!-- ============ WHATSAPP ============ -->
+<section class="feature" id="whatsapp">
+  <header class="hero"><div class="icon">💬</div><div>
+    <p class="eyebrow">Feature</p><h2>WhatsApp</h2>
+    <p>Admins connect the studio's own WhatsApp Business number (it keeps working in the WhatsApp Business app), create templates and send them to customers. Replies stay in the studio's WhatsApp app.</p>
+    <div class="chips"><a href="#wa-1">Connect</a><a href="#wa-3">Templates</a><a href="#wa-4">Send</a><a href="#wa-5">Webhook</a></div>
+  </div></header>
+  <div class="facts">
+    <div><b>Page</b><code>/studio/admin/whatsapp</code></div>
+    <div><b>Key files</b><code>ConnectWhatsAppButton.tsx</code> · <code>api/whatsapp/*</code> · <code>lib/whatsapp/graph.ts</code></div>
+    <div><b>Data</b><code>organizations.whatsapp_*</code> · <code>whatsapp_templates</code> · <code>whatsapp_sends</code></div>
+  </div>
+  <div class="diagram"><pre class="mermaid">sequenceDiagram
+  participant B as Connect button
+  participant FB as Meta popup
+  participant API as connect/callback
+  participant G as Graph API
+  B->>FB: FB.login with Coexistence extras
+  FB-->>B: finish event with waba_id
+  FB-->>B: one-time code
+  B->>API: code, wabaId, coexistence
+  API->>G: code to access token
+  API->>G: subscribe webhooks, list numbers
+  alt coexistence
+    API->>G: request two syncs
+  else normal number
+    API->>G: register number
+  end
+  API->>API: save on organization</pre></div>
+
+  <h3 id="wa-1">Connect a number</h3>
+  <ol class="steps">
+    <li><h5>The page checks the connection</h5>
+      <p>Not connected → the Connect button; connected → number, templates and sending.</p>
+      <div class="m"><span class="w"><code>whatsapp/page.tsx</code> → <code>loadConnection()</code></span><span class="d">reads <code>organizations.whatsapp_*</code></span></div></li>
+    <li><h5>The button loads Meta's SDK and listens for messages</h5>
+      <p>Facebook JS SDK v23.0 is loaded once; the page listens to the popup's postMessage events.</p>
+      <div class="m"><span class="w"><code>loadFacebookSdk()</code>, <code>handleMessage()</code></span></div></li>
+    <li><h5>"Connect to WhatsApp" opens Embedded Signup</h5>
+      <p><code>FB.login</code> with the login configuration and extras <code>version v3</code>, <code>featureType whatsapp_business_app_onboarding</code> (Coexistence). Detailed <code>[whatsapp-connect]</code> logs are printed for debugging.</p>
+      <div class="m"><span class="w"><code>handleConnect()</code></span></div></li>
+    <li><h5>The admin completes Meta's popup</h5>
+      <p>Logs in with Facebook, picks the business, types the number. A Business-app number is confirmed by a QR/message in the WhatsApp Business app.</p>
+      <div class="m"><span class="x">"Ineligible" / #2655111 until Meta approves the app</span></div></li>
+    <li><h5>Two halves arrive, in any order</h5>
+      <p>The finish event (<code>FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING</code> = Coexistence, <code>FINISH</code> = normal) and the one-time code. When both are in, the server is called.</p>
+      <div class="m"><span class="w"><code>checkBothReady()</code> → <code>POST /api/whatsapp/connect/callback</code></span></div></li>
+    <li><h5>The server checks plan and role, swaps the code for a token</h5>
+      <div class="m"><span class="w"><code>requireFeature("whatsapp")</code>, <code>exchangeCodeForToken()</code></span></div></li>
+    <li><h5>Webhooks are subscribed and the number found</h5>
+      <div class="m"><span class="w"><code>subscribeWabaWebhook()</code>, <code>listPhoneNumbers()</code></span><span class="x">"No phone number found on this WhatsApp account"</span></div></li>
+    <li><h5>Coexistence syncs or number registration</h5>
+      <p>Coexistence: request <code>smb_app_state_sync</code> and <code>history</code> (required within 24 h; the data is dropped). Normal number: register it for sending.</p>
+      <div class="m"><span class="w"><code>requestSmbAppSync()</code> / <code>registerPhoneNumber()</code></span></div></li>
+    <li><h5>The connection is saved</h5>
+      <p>WABA id, phone id, display number and the access token (plain text for now) are stored; the page shows Connected.</p>
+      <div class="m"><span class="d">updates <code>organizations</code></span><span class="s">"Connected" with the number</span></div></li>
+  </ol>
+
+  <h3 id="wa-2">Disconnect</h3>
+  <ol class="steps">
+    <li><h5>"Disconnect" clears the connection fields</h5>
+      <div class="m"><span class="w"><code>handleDisconnect()</code> → <code>DELETE /api/whatsapp/connect/callback</code></span><span class="d">clears <code>organizations.whatsapp_*</code></span></div></li>
+  </ol>
+
+  <h3 id="wa-3">Templates</h3>
+  <ol class="steps">
+    <li><h5>List: Meta is the source of truth</h5>
+      <p>The server fetches the WABA's templates and refreshes the local copy.</p>
+      <div class="m"><span class="w"><code>TemplatesPanel.tsx</code> → <code>/api/whatsapp/templates</code> → <code>listTemplates()</code></span><span class="d">upserts <code>whatsapp_templates</code></span></div></li>
+    <li><h5>Create</h5>
+      <p>Name, category (Marketing/Utility/Authentication), language and body text with <code>{{1}}</code> variables are sent to Meta, then saved locally (status usually PENDING).</p>
+      <div class="m"><span class="w"><code>handleCreate()</code> → <code>createTemplate()</code></span></div></li>
+    <li><h5>Delete</h5>
+      <p>Deleted on Meta first, then locally.</p>
+      <div class="m"><span class="w"><code>handleDelete()</code> → <code>templates/[id]</code></span></div></li>
+  </ol>
+
+  <h3 id="wa-4">Send to customers</h3>
+  <ol class="steps">
+    <li><h5>Pick an approved template, fill variables, tick customers</h5>
+      <div class="m"><span class="w"><code>SendMessagePanel.tsx</code></span></div></li>
+    <li><h5>The server sends one message per customer</h5>
+      <p>Each attempt is recorded, success or not.</p>
+      <div class="m"><span class="w"><code>/api/whatsapp/send</code> → <code>sendTemplateMessage()</code></span><span class="d">inserts <code>whatsapp_sends</code> (wamid, status)</span></div></li>
+    <li><h5>Results and live status</h5>
+      <p>The panel polls statuses (sent → delivered → read / failed).</p>
+      <div class="m"><span class="w"><code>/api/whatsapp/send/status</code></span><span class="s">per-customer status</span></div></li>
+  </ol>
+
+  <h3 id="wa-5">Delivery webhook</h3>
+  <ol class="steps">
+    <li><h5>Meta verifies the URL once</h5>
+      <div class="m"><span class="w"><code>webhook/route.ts</code> → <code>GET()</code> with <code>META_WEBHOOK_VERIFY_TOKEN</code></span></div></li>
+    <li><h5>Every event is signature-checked</h5>
+      <div class="m"><span class="w"><code>isValidSignature()</code> (HMAC with <code>META_APP_SECRET</code>)</span></div></li>
+    <li><h5>Only statuses are used</h5>
+      <p>Matching <code>whatsapp_sends</code> rows are updated by wamid. Replies, history and echoes are acknowledged and dropped.</p>
+      <div class="m"><span class="d">updates <code>whatsapp_sends.status</code></span></div></li>
+  </ol>
+
+  <h3 id="wa-6">Platform codes</h3>
+  <ol class="steps">
+    <li><h5>Login, signup and customer codes use Stenslee's own number</h5>
+      <p>Separate from studios' numbers; configured by <code>WHATSAPP_AUTH_*</code>.</p>
+      <div class="m"><span class="w"><code>sendAuthOtp()</code></span></div></li>
+  </ol>
+  <div class="note warn"><b>Before real studios can connect</b>Meta App Review (Advanced Access), business verification and Tech Provider status are required. Until then only Meta's +1 555 test numbers work (up to 5 recipients).</div>
+  <div class="issues"><h4>Known issues</h4><ul>
+    <li>Access tokens are stored in plain text for now (temporary).</li>
+    <li>No opt-in/opt-out tracking for marketing templates.</li>
+    <li>One webhook URL per Meta app — local servers never receive statuses.</li>
+  </ul></div>
+</section>
+
+<!-- ============ PLANS ============ -->
+<section class="feature" id="plans">
+  <header class="hero"><div class="icon">🎟️</div><div>
+    <p class="eyebrow">Feature</p><h2>Plans, credits &amp; permissions</h2>
+    <p>Plans switch features on and set limits; super admins can override per studio; AI credits pay for images; upgrades happen through a WhatsApp chat.</p>
+    <div class="chips"><a href="#plan-2">Feature check</a><a href="#plan-4">Credits</a><a href="#plan-5">Banner</a></div>
+  </div></header>
+  <div class="facts">
+    <div><b>Where</b>every page and AI route</div>
+    <div><b>Key files</b><code>require-feature.ts</code> · <code>use-feature.ts</code> · <code>credits.ts</code> · <code>PermissionBootstrap.tsx</code></div>
+    <div><b>Data</b><code>plan_features</code> · <code>organization_feature_overrides</code> · <code>usage_logs</code></div>
+  </div>
+  <div class="diagram"><pre class="mermaid">flowchart LR
+  P["Plan value"] --> O{"Override?"}
+  O -- yes --> V["Override"]
+  O -- no --> W["Plan"]
+  V --> U["Minus this month's usage"]
+  W --> U
+  U --> R["enabled · limit · used · remaining"]</pre></div>
+
+  <h3 id="plan-1">Features in the browser</h3>
+  <ol class="steps">
+    <li><h5>The app loads every feature once</h5>
+      <p>The root layout mounts <code>PermissionBootstrap</code>, which reads the staff row and calls <code>get_all_effective_access</code> for the studio.</p>
+      <div class="m"><span class="w"><code>PermissionBootstrap.tsx</code> → <code>fetchPermissions()</code></span></div></li>
+    <li><h5>Pages ask about one key</h5>
+      <p>Locked features show <code>&lt;FeatureLocked&gt;</code>, a disabled control, or hide the option.</p>
+      <div class="m"><span class="w"><code>useFeature(key)</code></span><span class="s">"Not available on your plan"</span></div></li>
+  </ol>
+
+  <h3 id="plan-2">Server feature check</h3>
+  <ol class="steps">
+    <li><h5>A protected route calls <code>requireFeature()</code></h5>
+      <div class="m"><span class="w"><code>require-feature.ts</code> → <code>checkFeature()</code></span></div></li>
+    <li><h5>Login, staff row and device are re-checked (with retries)</h5>
+      <p>A replaced login or inactive staff is refused.</p>
+      <div class="m"><span class="x">401 "Signed in on another device"</span></div></li>
+    <li><h5>The database works out the effective value</h5>
+      <div class="m"><span class="w"><code>get_effective_access(org, key)</code></span><span class="d">reads plans, overrides, <code>usage_logs</code></span></div></li>
+    <li><h5>Allow, or answer with a clear error</h5>
+      <p>Disabled or monthly limit reached → 403 with a message; the browser logs usage after successful work.</p>
+      <div class="m"><span class="w"><code>logUsage()</code></span><span class="d">inserts <code>usage_logs</code></span></div></li>
+  </ol>
+
+  <h3 id="plan-3">Seat check (adding a designer)</h3>
+  <ol class="steps">
+    <li><h5>Active designers are counted against <code>designer_seats</code></h5>
+      <div class="m"><span class="w"><code>requireSeatAvailable("designer")</code></span><span class="x">"Seat limit reached — your plan allows 10 designer accounts"</span></div></li>
+  </ol>
+
+  <h3 id="plan-4">AI credits</h3>
+  <ol class="steps">
+    <li><h5>Reserve before generating</h5>
+      <p>The route asks for 1–5 images; the database grants as many as the balance allows (10 credits each) in one locked step.</p>
+      <div class="m"><span class="w"><code>reserveCredits()</code> → <code>reserve_ai_credits</code></span><span class="x">"Out of AI credits"</span></div></li>
+    <li><h5>Refund failures</h5>
+      <p>Each failed image gives its credits back.</p>
+      <div class="m"><span class="w"><code>refundCredits()</code> → <code>refund_ai_credits</code></span></div></li>
+  </ol>
+
+  <h3 id="plan-5">Credits widget and upgrade banner</h3>
+  <ol class="steps">
+    <li><h5>Credits are re-read on every navigation</h5>
+      <p>The admin shell reads the studio name, balance and plan.</p>
+      <div class="m"><span class="w"><code>AdminSidebarShell.tsx</code></span><span class="d">reads <code>organizations</code></span></div></li>
+    <li><h5>Upgrade options</h5>
+      <p>Account menu "Upgrade plan", mobile "Upgrade" button and, at 0 credits, a dismissible banner — all open WhatsApp to the Stenslee team with the studio name.</p>
+      <div class="m"><span class="w"><code>upgradeWhatsAppUrl()</code></span><span class="s">gold strip "You've used all your AI credits"</span></div></li>
+  </ol>
+
+  <h3 id="plan-6">Super admin changes</h3>
+  <ol class="steps">
+    <li><h5>Plan switch, overrides, credits or status are saved in super-admin</h5>
+      <p>A plan switch resets credits to that plan's amount; overrides equal to the plan are removed.</p></li>
+    <li><h5>The studio sees it on its next load</h5>
+      <p>Server checks read live values on every request; the browser picks them up on reload or sign-in.</p></li>
+  </ol>
+  <div class="issues"><h4>Known issues</h4><ul>
+    <li>Staff can't read <code>plans</code>, so the widget's total shows the remaining balance.</li>
+    <li>Organization status (suspended/cancelled) isn't enforced in the studio.</li>
+  </ul></div>
+</section>
+
+<!-- ============ ADMIN ============ -->
+<section class="feature" id="admin">
+  <header class="hero"><div class="icon">🛠️</div><div>
+    <p class="eyebrow">Feature</p><h2>Studio admin</h2>
+    <p>The admin's dashboard, team management, Recently Deleted and settings, inside the admin shell.</p>
+    <div class="chips"><a href="#adm-2">Dashboard</a><a href="#adm-3">Add designer</a><a href="#adm-5">Trash</a></div>
+  </div></header>
+  <div class="facts">
+    <div><b>Pages</b><code>/studio/admin</code> · <code>designers</code> · <code>trash</code> · <code>settings</code></div>
+    <div><b>Key files</b><code>AdminSidebarShell.tsx</code> · <code>api/studio/designers</code> · <code>staff-phone.ts</code></div>
+    <div><b>Data</b><code>staff</code> · <code>sessions</code> · <code>folder_files</code></div>
+  </div>
+  <div class="diagram"><pre class="mermaid">flowchart TD
+  P["Phone entered"] --> Q{"Already staff?"}
+  Q -- "other studio" --> X1["Refused"]
+  Q -- "this studio, active or off" --> X2["Refused with hint"]
+  Q -- "this studio, removed" --> R["Restored"]
+  Q -- no --> S{"Seat free?"}
+  S -- yes --> T["Create or reuse login"] --> U["Designer added"]
+  S -- no --> X3["Seat limit"]</pre></div>
+
+  <h3 id="adm-1">Opening an admin page</h3>
+  <ol class="steps">
+    <li><h5>Proxy, then the shell checks the role</h5>
+      <p>Only active admins get the sidebar; login and signup pages never show it.</p>
+      <div class="m"><span class="w"><code>proxy.ts</code>, <code>AdminSidebarShell.tsx</code> → <code>check()</code></span></div></li>
+    <li><h5>Trash badge and credits load</h5>
+      <p>The badge counts sessions deleted since the admin last opened Trash.</p>
+      <div class="m"><span class="d">reads <code>staff.trash_last_viewed_at</code>, <code>sessions</code>, <code>organizations</code></span></div></li>
+    <li><h5>Account menu and logout</h5>
+      <p>Clicking the name opens Upgrade plan and Settings. Logout signs out this device only.</p>
+      <div class="m"><span class="w"><code>AccountMenu.tsx</code>, <code>handleLogout()</code></span></div></li>
+  </ol>
+
+  <h3 id="adm-2">Dashboard</h3>
+  <ol class="steps">
+    <li><h5>11 queries run at once</h5>
+      <p>Active and completed sessions, customers, designers, 14-day trend, top designers (30 days), recent work, unassigned sessions.</p>
+      <div class="m"><span class="w"><code>admin/page.tsx</code> → <code>load()</code></span></div></li>
+    <li><h5>Tiles, chart, leaderboard and Needs Attention fill in</h5>
+      <p>Days are bucketed by local date so they don't shift in India; the leaderboard shows only with 3+ designers.</p>
+      <div class="m"><span class="s">KPI tiles, trend, recent work grid</span></div></li>
+  </ol>
+
+  <h3 id="adm-3">Add a designer</h3>
+  <ol class="steps">
+    <li><h5>Name and phone are submitted</h5>
+      <div class="m"><span class="w"><code>designers/new/page.tsx</code> → <code>POST /api/studio/designers</code></span></div></li>
+    <li><h5>The number is looked up across all studios</h5>
+      <p>Other studio → refused (studio not named); active here → "already on your team"; deactivated → "turn them back on".</p>
+      <div class="m"><span class="w"><code>findStaffByPhone()</code></span></div></li>
+    <li><h5>Seat check, then restore or create</h5>
+      <p>A removed designer is restored with history; otherwise a login is created (or an unfinished-signup login reused) and a staff row inserted.</p>
+      <div class="m"><span class="w"><code>requireSeatAvailable()</code>, <code>createOrReuseAuthUser()</code></span><span class="d">inserts <code>staff</code></span></div></li>
+  </ol>
+
+  <h3 id="adm-4">Edit, deactivate, remove</h3>
+  <ol class="steps">
+    <li><h5>Edit name and photo</h5>
+      <div class="m"><span class="w"><code>handleSaveEdit()</code> → <code>PATCH /api/studio/designers</code></span><span class="d">storage <code>avatars</code>, <code>staff</code></span></div></li>
+    <li><h5>Active switch</h5>
+      <p>Written straight from the browser (RLS allows admins).</p>
+      <div class="m"><span class="w"><code>toggleDesigner()</code></span></div></li>
+    <li><h5>Remove</h5>
+      <p>Soft delete: the row stays so past sessions keep the name.</p>
+      <div class="m"><span class="w"><code>DELETE /api/studio/designers</code></span><span class="d"><code>staff.deleted_at</code></span></div></li>
+  </ol>
+
+  <h3 id="adm-5">Trash (Recently Deleted)</h3>
+  <ol class="steps">
+    <li><h5>Deleted sessions and library files load (15 per page)</h5>
+      <p>Each shows days left before automatic removal; opening Trash clears the badge.</p>
+      <div class="m"><span class="w"><code>trash/page.tsx</code></span><span class="d">updates <code>staff.trash_last_viewed_at</code></span></div></li>
+    <li><h5>Restore</h5>
+      <div class="m"><span class="w"><code>handleRestore()</code></span><span class="d"><code>sessions.deleted_at</code> = null</span></div></li>
+    <li><h5>Delete forever</h5>
+      <p>Files are removed from storage, then the row (chat cascades).</p>
+      <div class="m"><span class="w"><code>DELETE /api/studio/trash/[id]</code> → <code>deleteSessionStorage()</code></span></div></li>
+  </ol>
+
+  <h3 id="adm-6">Automatic purge</h3>
+  <ol class="steps">
+    <li><h5>pg_cron fires daily at 03:00 UTC</h5>
+      <div class="m"><span class="x">calls a placeholder URL with POST — nothing happens today</span></div></li>
+    <li><h5>The route would remove expired items</h5>
+      <p>Checks <code>CRON_SECRET</code>, reads each studio's <code>trash_retention</code>, deletes expired sessions, library files and empty folders.</p>
+      <div class="m"><span class="w"><code>api/cron/purge-trash</code> → <code>GET()</code></span></div></li>
+  </ol>
+  <div class="issues"><h4>Known issues</h4><ul>
+    <li>Designer edit/remove, profile and trash routes don't check the target's studio.</li>
+    <li>The purge job is misconfigured.</li>
+  </ul></div>
+</section>
+
+</main>
+</div>
+<button class="top" onclick="scrollTo({top:0})" aria-label="Back to top">↑</button>
+<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+const root = document.documentElement;
+try { const t = localStorage.getItem("blueprint-theme"); if (t) root.dataset.theme = t; } catch {}
+const dark = () => root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+const src = [...document.querySelectorAll("pre.mermaid")].map((el) => el.textContent);
+async function draw() {
+  mermaid.initialize({ startOnLoad: false, theme: dark() ? "dark" : "neutral", securityLevel: "loose" });
+  document.querySelectorAll("pre.mermaid").forEach((el, i) => { el.removeAttribute("data-processed"); el.textContent = src[i]; });
+  await mermaid.run({ querySelector: "pre.mermaid" });
+}
+draw();
+document.getElementById("theme").onclick = () => {
+  root.dataset.theme = dark() ? "light" : "dark";
+  try { localStorage.setItem("blueprint-theme", root.dataset.theme); } catch {}
+  draw();
+};
+const q = document.getElementById("q");
+q.addEventListener("input", () => {
+  const v = q.value.trim().toLowerCase();
+  document.querySelectorAll("aside a").forEach((a) => a.classList.toggle("hidden", !!v && !a.textContent.toLowerCase().includes(v)));
+});
+document.querySelectorAll("aside a").forEach((a) => a.addEventListener("click", () => document.body.classList.remove("nav")));
+const links = new Map([...document.querySelectorAll("aside a")].map((a) => [a.getAttribute("href").slice(1), a]));
+const io = new IntersectionObserver((es) => es.forEach((e) => {
+  if (!e.isIntersecting) return;
+  document.querySelectorAll("aside a.on").forEach((x) => x.classList.remove("on"));
+  links.get(e.target.id)?.classList.add("on");
+}), { rootMargin: "-70px 0px -75% 0px" });
+links.forEach((_, id) => { const el = document.getElementById(id); if (el) io.observe(el); });
+</script>
+</body>
+</html>

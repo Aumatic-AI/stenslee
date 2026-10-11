@@ -15,8 +15,12 @@ npm install
 npm run dev      # http://localhost:3000
 ```
 
-Create `.env.local` with the variables listed in the workspace docs (`docs/architecture.md` → Environment variables).
+Create `.env.local` with the variables listed in [`docs/technical.md`](docs/technical.md) → Configuration.
 
 ## Documentation
 
-Full documentation lives in the workspace `docs/` folder (one level up, outside this repo): overview, architecture, database, development guide and a doc per feature. Rules for Claude Code are in [`CLAUDE.md`](./CLAUDE.md).
+- [`docs/technical.md`](docs/technical.md) — architecture, approaches, configuration, local setup, known issues.
+- [`docs/database.md`](docs/database.md) — tables, access rules, functions, storage.
+- [`docs/blueprint.html`](docs/blueprint.html) — every feature's flow step by step, with diagrams; open it in a browser.
+
+Rules for Claude Code are in [`CLAUDE.md`](./CLAUDE.md).
